@@ -94,4 +94,4 @@
 - [x] Run `GOCACHE=/tmp/wanxiang-m01-go-cache go test ./...` and confirm zero failures.
 - [x] Run `npm test -- --run && npm run build` and confirm tests and build pass.
 - [x] Update M01 and the handoff block with commit, tests, risks, and `next_action` for M02.
-- [ ] Commit the Mission implementation, merge it into `main`, re-run verification on `main`, and push `origin/main`.
+- [x] Commit the Mission implementation, merge it into `main`, re-run verification on `main`, and push `origin/main`.

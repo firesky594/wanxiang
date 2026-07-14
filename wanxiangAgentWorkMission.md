@@ -214,7 +214,10 @@ agent: Codex
 branch: feat/mission-04
 base_commit: cb231e8
 checkpoint_commit: null
-completed: []
+completed:
+  - 支持安全复用已登记且干净的 main 项目
+  - 增加 project_workspaces 数据状态和唯一约束
+  - 实现确定性 project 与 assignment YAML、哈希和安全校验
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./...
     result: baseline passed
@@ -228,7 +231,7 @@ backend_build_result: pending
 backend_restart_required: true
 backend_restarted: false
 backend_restart_reason: 尚未替换运行中的后端二进制
-next_action: 完成项目复用和 project_workspaces 数据状态
+next_action: 实现幂等 provision 和独立 Agent worktree
 ```
 
 目标：建立可执行、可审计的项目范围和 Git 隔离环境。

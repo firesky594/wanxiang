@@ -56,11 +56,11 @@
 - Produces: `EncodeAssignment(AssignmentMetadata) ([]byte, string, error)`，第二个返回值为 SHA-256。
 - Produces: `DecodeAssignment([]byte) (AssignmentMetadata, error)`.
 
-- [ ] 写失败测试，固定字段顺序、LF、稳定哈希、空负责人、多个 Agent 和默认 `write_scope: ["."]` 的 golden 输出。
-- [ ] 写失败测试，拒绝绝对 scope、`..`、无效 Agent、无效分支和未知 YAML 字段。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces -run Metadata`，确认失败。
-- [ ] 实现无密钥、确定性 YAML 编解码和路径/名称校验，不把绝对 worktree 路径写入 Git。
-- [ ] 重跑测试确认通过。
+- [x] 写失败测试，固定字段顺序、LF、稳定哈希、空负责人、多个 Agent 和默认 `write_scope: ["."]` 的 golden 输出。
+- [x] 写失败测试，拒绝绝对 scope、`..`、无效 Agent、无效分支和未知 YAML 字段。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces -run Metadata`，确认失败。
+- [x] 实现无密钥、确定性 YAML 编解码和路径/名称校验，不把绝对 worktree 路径写入 Git。
+- [x] 重跑测试确认通过。
 - [ ] 提交：`功能：生成可校验的项目分配元数据`。
 
 ### Task 3: 幂等 provision 和独立 worktree

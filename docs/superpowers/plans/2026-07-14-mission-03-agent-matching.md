@@ -47,10 +47,10 @@
 
 **文件：** `server/internal/app/`、`server/internal/httpapi/`、`web/src/`
 
-- [ ] planned 任务自动进入匹配；Probe 成功后恢复 missing_config 任务。
-- [ ] 增加匹配结果查询和管理员覆盖 API。
-- [ ] Web 任务详情展示候选、评分、拒绝原因和负责人。
-- [ ] 覆盖操作写入 runtime_events 和 audit_logs。
+- [x] planned 任务自动进入匹配；Probe 成功后恢复 missing_config 任务。
+- [x] 增加匹配结果查询和管理员覆盖 API。
+- [x] Web 任务详情展示候选、评分、拒绝原因和负责人。
+- [x] 覆盖操作写入 runtime_events 和 audit_logs。
 
 ### Task 5：交付验证
 

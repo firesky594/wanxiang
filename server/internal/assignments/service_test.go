@@ -79,6 +79,37 @@ func TestAssignTaskCreatesNonSecretBlockedAgentWhenNoCandidate(t *testing.T) {
 	assertTableCount(t, conn, "task_assignments", 0)
 }
 
+func TestAdminOverrideWritesDecisionEventAndAudit(t *testing.T) {
+	cfg, conn, taskID := assignmentFixture(t)
+	writeAgent(t, cfg, "api-agent", "backend", []string{"go"}, 1)
+	writeAgent(t, cfg, "replacement", "backend", []string{"go"}, 2)
+	registerAgent(t, conn, cfg, "api-agent", "backend", "online")
+	registerAgent(t, conn, cfg, "replacement", "backend", "online")
+	svc := NewService(cfg, conn)
+	if _, err := svc.AssignTask(t.Context(), taskID); err != nil {
+		t.Fatal(err)
+	}
+	var stepID int64
+	if err := conn.QueryRow(`select id from task_steps where task_id=? order by id limit 1`, taskID).Scan(&stepID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Override(t.Context(), taskID, stepID, "replacement", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	var assigned string
+	if err := conn.QueryRow(`select agent_name from task_assignments where step_id=?`, stepID).Scan(&assigned); err != nil {
+		t.Fatal(err)
+	}
+	if assigned != "replacement" {
+		t.Fatalf("assigned=%q", assigned)
+	}
+	assertTableCount(t, conn, "audit_logs", 1)
+	var events int
+	if err := conn.QueryRow(`select count(*) from runtime_events where event_type='task.assignment.overridden'`).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("events=%d err=%v", events, err)
+	}
+}
+
 func assignmentFixture(t *testing.T) (config.Config, *sql.DB, int64) {
 	t.Helper()
 	cfg, _ := config.Load(t.TempDir())

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"wanxiang-agent/server/internal/agents"
+	"wanxiang-agent/server/internal/assignments"
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/db"
 	"wanxiang-agent/server/internal/events"
@@ -19,11 +20,12 @@ import (
 )
 
 type App struct {
-	Config   config.Config
-	DB       *sql.DB
-	Launcher *agents.Launcher
-	Planning *planning.Worker
-	HTTP     httpapi.Dependencies
+	Config      config.Config
+	DB          *sql.DB
+	Launcher    *agents.Launcher
+	Planning    *planning.Worker
+	Assignments *assignments.Worker
+	HTTP        httpapi.Dependencies
 }
 
 func New(cfg config.Config) (*App, error) {
@@ -51,16 +53,23 @@ func New(cfg config.Config) (*App, error) {
 	planningSvc := planning.NewService(cfg, conn, agentSvc)
 	planningWorker := planning.NewWorker(conn, planningSvc, agentSvc, 2*time.Second)
 	planningWorker.Start()
+	assignmentSvc := assignments.NewService(cfg, conn)
+	assignmentWorker := assignments.NewWorker(conn, assignmentSvc, 2*time.Second)
+	assignmentWorker.Start()
 	return &App{
-		Config:   cfg,
-		DB:       conn,
-		Launcher: launcher,
-		Planning: planningWorker,
-		HTTP:     httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc},
+		Config:      cfg,
+		DB:          conn,
+		Launcher:    launcher,
+		Planning:    planningWorker,
+		Assignments: assignmentWorker,
+		HTTP:        httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc},
 	}, nil
 }
 
 func (a *App) Close() error {
+	if a.Assignments != nil {
+		a.Assignments.Close()
+	}
 	if a.Planning != nil {
 		a.Planning.Close()
 	}

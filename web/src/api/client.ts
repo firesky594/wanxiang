@@ -109,6 +109,43 @@ export interface TaskDetail {
   edges: WorkflowEdge[]
 }
 
+export interface MatchRejection {
+  name: string
+  reasons: string[]
+}
+
+export interface MatchDecision {
+  id: number
+  step_id: number
+  selected_agent?: string
+  score: number
+  reasons: string[]
+  rejections: MatchRejection[]
+  status: string
+}
+
+export interface TaskMatch {
+  task_id: number
+  decisions: MatchDecision[]
+  assignments: Array<{ step_id: number; agent_name: string; reports_to?: string }>
+  requires_lead: boolean
+  project_lead?: string
+  lead_reason?: string
+}
+
+export async function getTaskMatch(taskID: number): Promise<TaskMatch> {
+  const response = await api<{ ok: boolean; match: TaskMatch }>(`/api/admin/tasks/${taskID}/match`)
+  return response.match
+}
+
+export async function overrideTaskMatch(taskID: number, stepID: number, agentName: string): Promise<TaskMatch> {
+  const response = await api<{ ok: boolean; match: TaskMatch }>(`/api/admin/tasks/${taskID}/match`, {
+    method: 'PUT',
+    body: JSON.stringify({ step_id: stepID, agent_name: agentName })
+  })
+  return response.match
+}
+
 export interface MergeRequest {
   id: number
   project_id: number

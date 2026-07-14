@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"wanxiang-agent/server/internal/assignments"
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/events"
 	"wanxiang-agent/server/internal/issues"
@@ -50,6 +51,7 @@ func TestAdminQueryReturnsWorkflowCollections(t *testing.T) {
 	for _, path := range []string{
 		"/api/admin/projects",
 		"/api/admin/tasks/" + itoa(task.ID) + "/events",
+		"/api/admin/tasks/" + itoa(task.ID) + "/match",
 		"/api/admin/mrs?task_id=" + itoa(task.ID),
 		"/api/admin/issues?task_id=" + itoa(task.ID),
 	} {
@@ -68,7 +70,8 @@ func queryFixture(t *testing.T) (http.Handler, string, tasks.Task) {
 	taskSvc := tasks.NewService(cfg, conn, bus)
 	issueSvc := issues.NewService(conn, bus)
 	mrSvc := mr.NewService(cfg, conn, bus, nil, issueSvc)
-	router := NewRouter(Dependencies{DB: conn, Bus: bus, Tasks: taskSvc, Issues: issueSvc, MR: mrSvc})
+	assignmentSvc := assignments.NewService(cfg, conn)
+	router := NewRouter(Dependencies{DB: conn, Bus: bus, Tasks: taskSvc, Issues: issueSvc, MR: mrSvc, Assignments: assignmentSvc})
 	res := adminRequest(router, "", http.MethodPost, "/api/admin/bootstrap", `{"username":"admin","password":"secret123"}`)
 	var auth struct {
 		Token string `json:"token"`

@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,88 @@ import (
 	"wanxiang-agent/server/internal/gitx"
 	"wanxiang-agent/server/internal/testutil"
 )
+
+func TestListTasksReturnsNewestFirst(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn, events.NewBus(conn))
+	first := insertTaskFixture(t, conn, "first", "2026-07-14T01:00:00Z")
+	second := insertTaskFixture(t, conn, "second", "2026-07-14T02:00:00Z")
+
+	got, err := svc.List(context.Background(), 10, 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != second || got[1].ID != first {
+		t.Fatalf("tasks=%+v", got)
+	}
+}
+
+func TestGetTaskReturnsProjectStepsAndEdges(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn, events.NewBus(conn))
+	taskID := insertTaskFixture(t, conn, "detail", "2026-07-14T01:00:00Z")
+	res, err := conn.Exec(`insert into task_steps(task_id,agent_name,kind,status,input,output,created_at) values(?,?,?,?,?,?,?)`, taskID, "manager", "plan", "created", "in", "", "2026-07-14T01:00:01Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepID, _ := res.LastInsertId()
+	if _, err := conn.Exec(`insert into workflow_edges(task_id,from_step_id,to_step_id,label,created_at) values(?,?,?,?,?)`, taskID, nil, stepID, "starts", "2026-07-14T01:00:02Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Get(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Project.ID == 0 || got.Task.ProjectSlug == "" || len(got.Steps) != 1 || len(got.Edges) != 1 {
+		t.Fatalf("detail=%+v", got)
+	}
+	if _, err := svc.Get(context.Background(), 9999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing err=%v", err)
+	}
+}
+
+func TestUpdateTaskStatusEnforcesTransitions(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn, events.NewBus(conn))
+	taskID := insertTaskFixture(t, conn, "status", "2026-07-14T01:00:00Z")
+
+	if _, err := svc.UpdateStatus(context.Background(), taskID, "completed", "admin"); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("invalid transition err=%v", err)
+	}
+	got, err := svc.UpdateStatus(context.Background(), taskID, "planning", "manager")
+	if err != nil || got.Status != "planning" {
+		t.Fatalf("UpdateStatus task=%+v err=%v", got, err)
+	}
+	var eventType string
+	if err := conn.QueryRow(`select event_type from runtime_events where task_id=? order by id desc limit 1`, taskID).Scan(&eventType); err != nil {
+		t.Fatal(err)
+	}
+	if eventType != "task.status_changed" {
+		t.Fatalf("event=%q", eventType)
+	}
+}
+
+func insertTaskFixture(t *testing.T, conn *sql.DB, title, createdAt string) int64 {
+	t.Helper()
+	res, err := conn.Exec(`insert into projects(slug,dir,status,remote_url,created_at) values(?,?,?,?,?)`, "project-"+title, "/tmp/"+title, "created", "", createdAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := res.LastInsertId()
+	res, err = conn.Exec(`insert into tasks(project_id,title,description,status,priority,created_at) values(?,?,?,?,0,?)`, projectID, title, title+" description", "created", createdAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, _ := res.LastInsertId()
+	return taskID
+}
 
 func TestCreateTaskInitializesProjectRepository(t *testing.T) {
 	root := t.TempDir()

@@ -8,6 +8,21 @@ import (
 	"wanxiang-agent/server/internal/testutil"
 )
 
+func TestListReturnsPersistedTaskEventsNewestFirst(t *testing.T) {
+	conn := testutil.OpenDB(t)
+	bus := NewBus(conn)
+	taskID := int64(7)
+	for _, kind := range []string{"first", "second"} {
+		if err := bus.PublishJSON(context.Background(), &taskID, kind, "manager", map[string]any{"kind": kind}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := bus.List(context.Background(), &taskID, 10, 0)
+	if err != nil || len(got) != 2 || got[0].Type != "second" {
+		t.Fatalf("events=%+v err=%v", got, err)
+	}
+}
+
 func TestPublishStoresAndBroadcastsEvent(t *testing.T) {
 	conn := testutil.OpenDB(t)
 	bus := NewBus(conn)

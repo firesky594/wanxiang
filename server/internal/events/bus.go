@@ -68,3 +68,41 @@ func (b *Bus) Subscribe() (<-chan Event, func()) {
 		b.mu.Unlock()
 	}
 }
+
+func (b *Bus) List(ctx context.Context, taskID *int64, limit, offset int) ([]Event, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := `select id,task_id,event_type,actor,payload_json,created_at from runtime_events`
+	args := []any{}
+	if taskID != nil {
+		query += ` where task_id=?`
+		args = append(args, *taskID)
+	}
+	query += ` order by id desc limit ? offset ?`
+	args = append(args, limit, offset)
+	rows, err := b.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]Event, 0)
+	for rows.Next() {
+		var item Event
+		var id sql.NullInt64
+		var payload, created string
+		if err := rows.Scan(&item.ID, &id, &item.Type, &item.Actor, &payload, &created); err != nil {
+			return nil, err
+		}
+		if id.Valid {
+			item.TaskID = &id.Int64
+		}
+		item.Payload = json.RawMessage(payload)
+		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}

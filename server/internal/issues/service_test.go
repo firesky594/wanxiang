@@ -8,6 +8,23 @@ import (
 	"wanxiang-agent/server/internal/testutil"
 )
 
+func TestListFiltersIssuesByTask(t *testing.T) {
+	conn := testutil.OpenDB(t)
+	svc := NewService(conn)
+	taskID := int64(4)
+	if _, err := svc.Create(context.Background(), CreateIssueInput{TaskID: &taskID, Title: "one", Body: "body", CreatedBy: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	other := int64(5)
+	if _, err := svc.Create(context.Background(), CreateIssueInput{TaskID: &other, Title: "other", Body: "body", CreatedBy: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.List(context.Background(), &taskID, 10, 0)
+	if err != nil || len(got) != 1 || got[0].Title != "one" {
+		t.Fatalf("issues=%+v err=%v", got, err)
+	}
+}
+
 func TestBlockingIssuePreventsMRProgress(t *testing.T) {
 	conn := testutil.OpenDB(t)
 	svc := NewService(conn)

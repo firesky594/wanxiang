@@ -17,6 +17,29 @@ import (
 	"wanxiang-agent/server/internal/testutil"
 )
 
+func TestListFiltersMergeRequestsByTask(t *testing.T) {
+	ctx := context.Background()
+	conn := testutil.OpenDB(t)
+	bus := events.NewBus(conn)
+	cfg, _ := config.Load(t.TempDir())
+	svc := NewService(cfg, conn, bus, nil)
+	if _, err := conn.Exec(`insert into projects(id,slug,dir,status,remote_url,created_at) values(1,'p','/tmp/p','created','','now')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`insert into tasks(id,project_id,title,description,status,created_at) values(4,1,'t','d','created','now')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Create(ctx, 1, 4, "one", "agent/a/work", "a"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.List(ctx, ptrInt64(4), 10, 0)
+	if err != nil || len(got) != 1 || got[0].Title != "one" {
+		t.Fatalf("mrs=%+v err=%v", got, err)
+	}
+}
+
+func ptrInt64(v int64) *int64 { return &v }
+
 func TestManagerMergeRejectsNonManager(t *testing.T) {
 	root := t.TempDir()
 	cfg, _ := config.Load(root)

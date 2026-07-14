@@ -51,6 +51,46 @@ func (s *Service) HasBlockingForMR(ctx context.Context, mrID int64) (bool, error
 	return count > 0, err
 }
 
+func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([]Issue, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := `select id,task_id,mr_id,title,body,status,blocking,created_by from issues`
+	args := []any{}
+	if taskID != nil {
+		query += ` where task_id=?`
+		args = append(args, *taskID)
+	}
+	query += ` order by id desc limit ? offset ?`
+	args = append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]Issue, 0)
+	for rows.Next() {
+		var item Issue
+		var task, mr sql.NullInt64
+		var blocking int
+		if err := rows.Scan(&item.ID, &task, &mr, &item.Title, &item.Body, &item.Status, &blocking, &item.CreatedBy); err != nil {
+			return nil, err
+		}
+		if task.Valid {
+			item.TaskID = &task.Int64
+		}
+		if mr.Valid {
+			item.MRID = mr.Int64
+		}
+		item.Blocking = blocking == 1
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func nullableMRID(id int64) any {
 	if id == 0 {
 		return nil

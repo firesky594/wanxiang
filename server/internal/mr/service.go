@@ -68,6 +68,37 @@ func (s *Service) Create(ctx context.Context, projectID, taskID int64, title, so
 	return created, nil
 }
 
+func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([]MergeRequest, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := `select id,project_id,task_id,title,source_branch,target_branch,status from merge_requests`
+	args := []any{}
+	if taskID != nil {
+		query += ` where task_id=?`
+		args = append(args, *taskID)
+	}
+	query += ` order by id desc limit ? offset ?`
+	args = append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]MergeRequest, 0)
+	for rows.Next() {
+		var item MergeRequest
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.TaskID, &item.Title, &item.SourceBranch, &item.TargetBranch, &item.Status); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (s *Service) ManagerMerge(ctx context.Context, mrID int64, actor string) error {
 	if actor != "manager" {
 		return errors.New("only manager can merge main")

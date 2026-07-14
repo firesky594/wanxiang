@@ -67,6 +67,13 @@
           <AgentOutputPanel :events="events.events" />
         </div>
       </section>
+      <section class="panel stack" style="margin-top: 16px">
+        <h2>持久任务</h2>
+        <el-empty v-if="!tasks.loading && tasks.tasks.length === 0" description="尚无任务" />
+        <RouterLink v-for="task in tasks.tasks" :key="task.id" :to="`/tasks/${task.id}`" class="mono">
+          #{{ task.id }} {{ task.title }} · {{ task.status }}
+        </RouterLink>
+      </section>
     </main>
   </section>
 </template>
@@ -80,8 +87,10 @@ import { api, type Task } from '../api/client'
 import AgentOutputPanel from '../components/AgentOutputPanel.vue'
 import WorkflowGraph from '../components/WorkflowGraph.vue'
 import { useEventsStore } from '../stores/events'
+import { useTasksStore } from '../stores/tasks'
 
 const events = useEventsStore()
+const tasks = useTasksStore()
 const taskTitle = ref('')
 const taskDescription = ref('')
 const creatingTask = ref(false)
@@ -89,7 +98,10 @@ const createdTask = ref<Task | null>(null)
 
 const lastEvent = computed(() => events.events.at(-1))
 
-onMounted(() => events.connect())
+onMounted(async () => {
+  await tasks.loadList()
+  events.connect()
+})
 
 async function createTask() {
   if (!taskTitle.value.trim()) {
@@ -103,6 +115,7 @@ async function createTask() {
       body: JSON.stringify({ title: taskTitle.value, description: taskDescription.value })
     })
     createdTask.value = res.task
+    await tasks.loadList()
     ElMessage.success('任务项目已创建')
   } finally {
     creatingTask.value = false

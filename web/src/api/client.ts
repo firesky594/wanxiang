@@ -71,6 +71,44 @@ export interface Task {
   status: string
 }
 
+export interface Project {
+  id: number
+  slug: string
+  dir: string
+  status: string
+  main_commit?: string
+  remote_url: string
+  created_at: string
+}
+
+export interface TaskStep {
+  id: number
+  task_id: number
+  agent_name: string
+  kind: string
+  status: string
+  input: string
+  output: string
+  created_at: string
+  completed_at?: string
+}
+
+export interface WorkflowEdge {
+  id: number
+  task_id: number
+  from_step_id?: number
+  to_step_id?: number
+  label: string
+  created_at: string
+}
+
+export interface TaskDetail {
+  task: Task
+  project: Project
+  steps: TaskStep[]
+  edges: WorkflowEdge[]
+}
+
 export interface MergeRequest {
   id: number
   project_id: number

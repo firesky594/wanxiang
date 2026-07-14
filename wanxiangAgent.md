@@ -483,7 +483,158 @@ review -> changes_requested -> in_progress
 - 合并测试失败且连续修复未解决。
 - 工作范围超出用户原始任务。
 
-## 15. 给后续 Agent 的阅读顺序
+## 15. Agent 断点续接
+
+平台使用“数据库任务状态 + Git checkpoint + 简短上下文摘要”恢复中断的工作。数据库记录谁有权继续执行，Git 保存可复现的代码状态，上下文摘要告诉恢复者下一步做什么。模型聊天记录不能作为唯一恢复依据。
+
+### 15.1 恢复目标
+
+Agent 进程退出、网络断开、Provider 暂时不可用或服务重启后，平台应做到：
+
+- 保留已经完成并验证的代码和任务步骤。
+- 阻止原 Agent 与接替 Agent 同时修改同一个工作包。
+- 原 Agent 恢复在线后从最近一个有效检查点继续。
+- 原 Agent 无法及时返回时，由总管把工作包安全转交给其他 Agent。
+- 向用户展示中断时间、恢复来源、代码基线和剩余工作。
+
+### 15.2 数据库任务状态和租约
+
+每个 `task_step` 需要持久化以下恢复字段：
+
+| 字段 | 用途 |
+| --- | --- |
+| `status` | `created`、`assigned`、`in_progress`、`checkpointed`、`interrupted`、`review`、`merged`、`completed` 或 `blocked` |
+| `assigned_agent` | 当前有权执行该工作包的 Agent |
+| `lease_id` | 每次分配生成的新租约标识 |
+| `lease_version` | 接管时递增，拒绝旧执行者继续写入 |
+| `lease_expires_at` | 心跳超过该时间后允许总管判定中断 |
+| `last_heartbeat_at` | Agent 最近一次任务级心跳 |
+| `checkpoint_id` | 最近一个已确认检查点 |
+| `attempt` | 当前工作包被恢复或接管的次数 |
+| `interrupted_at` | 本轮中断时间 |
+| `resume_deadline` | 等待原 Agent 自动恢复的截止时间 |
+
+Agent 调用任务写接口时必须同时提交 `task_id`、`step_id`、`agent_name`、`lease_id` 和 `lease_version`。Go 服务校验租约后才允许更新状态、事件、报告或 MR。心跳不能只更新 Agent 在线状态，还要续期当前工作包租约。
+
+推荐默认值：任务级心跳每 15 秒一次；连续 60 秒没有心跳时标记 `interrupted`；再等待 5 分钟让原 Agent 恢复。高风险任务可以由总管或用户延长等待时间。平台重启后由恢复扫描器重新计算租约，不能因为进程重启立即重复分配任务。
+
+### 15.3 Git checkpoint
+
+每个执行 Agent 使用独立分支和 worktree。分支格式保持 `agent/<agent-name>/<work-item>`。Agent 在以下时机创建 checkpoint：
+
+- 完成一个可独立验证的步骤后。
+- 修改公共接口、数据库结构或依赖版本前。
+- 开始预计耗时较长的测试或外部操作前。
+- 收到关闭、重启或租约即将到期信号时。
+
+检查点优先使用正常 Git 提交，提交信息格式为 `checkpoint(<step-id>): <summary>`。检查点提交必须保持项目可解析；能运行的局部测试应当通过。无法形成安全提交时，Agent 写入上下文摘要并保留 worktree，平台不得自动执行 `reset`、`clean` 或删除该 worktree。
+
+平台为每个检查点记录：
+
+- 项目、任务、工作包和 Agent。
+- 分支、worktree 路径、起始提交和 checkpoint 提交。
+- 工作区是否干净及未提交文件清单。
+- 已执行的测试命令和结果。
+- 是否包含迁移、密钥、部署或不可逆操作。
+
+接替 Agent 默认从最近一个干净 checkpoint 创建 `agent/<new-agent>/<work-item>-resume-<attempt>` 分支。若原 worktree 含未提交修改，总管先把该状态标记为需要恢复审查，不能让两个 Agent 共用同一个 worktree。
+
+### 15.4 简短上下文摘要
+
+每次 checkpoint 和正常退出前，Agent 写入结构化摘要。摘要保存在数据库，并同步到项目目录：
+
+```text
+.wanxiang/checkpoints/<step-id>/<checkpoint-id>.yaml
+```
+
+摘要至少包含：
+
+```yaml
+task_id: 12
+step_id: 34
+agent: backend-dev
+lease_version: 2
+branch: agent/backend-dev/auth-api
+worktree: /absolute/project/worktree/path
+base_commit: abc1234
+checkpoint_commit: def5678
+completed:
+  - 已增加登录请求校验
+next_action: 增加过期会话测试
+files_changed:
+  - server/internal/auth/session.go
+tests:
+  - command: go test ./internal/auth
+    result: passed
+decisions:
+  - 会话过期时间由服务端计算
+blockers: []
+risks:
+  - 尚未执行完整后端测试
+```
+
+摘要只记录恢复工作需要的信息。Agent 不能写入 API 密钥、访问令牌、完整模型对话、用户隐私或无关日志。`next_action` 必须是一项可以立即执行的动作。
+
+### 15.5 原 Agent 重连流程
+
+1. Agent 使用自身令牌重新注册并报告当前 `task_id`、`step_id`、`lease_id` 和 `lease_version`。
+2. Go 服务检查工作包仍处于 `interrupted`，且没有新 Agent 获得更高版本租约。
+3. 恢复器校验项目路径、worktree、分支、HEAD、checkpoint 提交和工作区状态。
+4. Agent 读取 `task.yaml`、`project.yaml`、assignment、最近检查点摘要和检查点之后的事件。
+5. Agent 先运行摘要中最近一条通过的最小验证命令，确认代码基线仍然有效。
+6. Go 服务恢复租约，把状态改回 `in_progress`，发布 `task.step.resumed` 事件。
+7. Agent 从 `next_action` 继续，并在下一次 checkpoint 更新摘要。
+
+任何校验失败都不能自动覆盖文件。Agent 创建阻塞 Issue，记录期望提交、实际提交、工作区差异和需要用户或总管决定的事项。
+
+### 15.6 超时接管流程
+
+原 Agent 超过 `resume_deadline` 仍未恢复时，总管执行接管：
+
+1. 将旧租约标记为 `revoked`，递增 `lease_version`。
+2. 选择满足任务能力、权限和负载要求的新 Agent。
+3. 读取最近一个有效 checkpoint 和上下文摘要。
+4. 从 checkpoint 提交创建新的接力分支和独立 worktree。
+5. 运行摘要中的基线测试；失败时先创建阻塞 Issue，不继续修改代码。
+6. 写入新的 assignment、接管原因、旧 Agent、新 Agent 和分支关系。
+7. 发布 `task.step.reassigned` 事件并继续工作。
+
+旧 Agent 之后重新上线时只能读取原工作包和提交恢复报告。除非总管再次分配，否则旧租约不能写任务状态、项目文件或 MR。
+
+### 15.7 幂等和并发保护
+
+- 所有状态更新使用 `step_id + lease_version + expected_status` 做条件更新。
+- checkpoint 请求携带幂等键；重复请求返回原 checkpoint，不创建重复提交或事件。
+- 同一个工作包同时只能有一个有效写租约。
+- MR 创建和合并前校验分支属于当前租约或已经进入审核状态的已撤销租约。
+- 任务恢复、重新分配、检查点失败和租约冲突写入 `runtime_events` 与 `audit_logs`。
+- `agent_tokens.scopes` 必须限制 Agent 只能操作被分配的项目、工作包和接口。
+
+### 15.8 用户界面和人工控制
+
+任务详情页需要展示 Agent 最近心跳、租约剩余时间、checkpoint 提交、上下文摘要、中断原因和恢复次数。用户可以执行：
+
+- 延长原 Agent 的恢复等待时间。
+- 立即让总管重新分配。
+- 指定接替 Agent。
+- 冻结工作包，禁止任何 Agent 继续写入。
+- 选择从某个历史 checkpoint 重新开始。
+
+重新分配、跳过 checkpoint 或恢复含未提交修改的 worktree 属于高风险操作，界面必须展示影响范围并要求用户确认。
+
+### 15.9 恢复功能验收条件
+
+- Agent 在工作中断后能从最近 checkpoint 恢复，已完成步骤不会重复执行。
+- 旧 Agent 使用过期租约写入时收到明确的租约冲突错误。
+- 服务重启不会丢失 assignment、checkpoint、摘要或恢复期限。
+- 接替 Agent 使用独立分支和 worktree，不修改原 Agent 的现场。
+- checkpoint 基线测试失败时停止恢复并创建阻塞 Issue。
+- API、事件、日志和 Git 提交不包含密钥。
+- 用户能在管理台查看中断、恢复和接管的完整时间线。
+
+具体实施顺序和当前完成状态记录在根目录 `wanxiangAgentWorkMission.md`。后续 AI 开始实现前必须先读取该文件，并在完成每个 Mission 后更新其中的证据和状态。
+
+## 16. 给后续 Agent 的阅读顺序
 
 1. 阅读本文档，确认角色、权限、汇报对象和“已实现/目标”边界。
 2. 阅读 `README.md`，了解启动、部署和模型配置。
@@ -493,7 +644,9 @@ review -> changes_requested -> in_progress
 6. 检查 Git 状态，保留不属于当前任务的用户改动。
 7. 执行 Agent 进入 `projects/<project>` 后再次读取项目内说明和 `.wanxiang/` 元数据。
 
-## 16. 文档维护规则
+8. 阅读 `wanxiangAgentWorkMission.md`，选择依赖已经完成的下一个 Mission，并记录开始状态。
+
+## 17. 文档维护规则
 
 - 用户可以直接修改任何规则，用户的新指令优先。
 - 总管修改本文档时必须把“当前实现变化”和“目标规则变化”分开说明。
@@ -501,3 +654,4 @@ review -> changes_requested -> in_progress
 - 权限、密钥、合并规则和部署行为发生变化时，必须同步更新流程图和权限矩阵。
 - 不在本文档中记录真实密钥、令牌、用户隐私或内部服务凭据。
 - 每次修改通过 Git 提交保留原因，方便其他 Agent 追溯设计演变。
+- 每完成一个 Mission，执行者必须更新 `wanxiangAgentWorkMission.md` 中的状态、提交、测试证据、剩余风险和下一步。

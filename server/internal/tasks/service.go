@@ -41,6 +41,28 @@ func (s *Service) List(ctx context.Context, limit, offset int) ([]Task, error) {
 	return result, rows.Err()
 }
 
+func (s *Service) ListProjects(ctx context.Context, limit, offset int) ([]Project, error) {
+	limit, offset = normalizePagination(limit, offset)
+	rows, err := s.db.QueryContext(ctx, `select id,slug,dir,status,main_commit,remote_url,created_at from projects order by created_at desc,id desc limit ? offset ?`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]Project, 0)
+	for rows.Next() {
+		var item Project
+		var main sql.NullString
+		if err := rows.Scan(&item.ID, &item.Slug, &item.Dir, &item.Status, &main, &item.RemoteURL, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		if main.Valid {
+			item.MainCommit = &main.String
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (s *Service) Get(ctx context.Context, id int64) (TaskDetail, error) {
 	var detail TaskDetail
 	var mainCommit sql.NullString

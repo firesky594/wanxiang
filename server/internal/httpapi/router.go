@@ -42,10 +42,21 @@ func NewRouter(deps Dependencies) http.Handler {
 			admin.Get("/api/events/stream", handleEventStream(deps.Bus))
 		}
 		if deps.Tasks != nil {
+			admin.Get("/api/admin/projects", handleListProjects(deps.Tasks))
 			admin.Post("/api/admin/tasks", handleCreateTask(deps.Tasks))
+			admin.Get("/api/admin/tasks", handleListTasks(deps.Tasks))
+			admin.Get("/api/admin/tasks/{id}", handleGetTask(deps.Tasks))
+			admin.Patch("/api/admin/tasks/{id}/status", handleUpdateTaskStatus(deps.Tasks))
+			if deps.Bus != nil {
+				admin.Get("/api/admin/tasks/{id}/events", handleListEvents(deps.Bus))
+			}
 		}
 		if deps.Issues != nil {
 			admin.Post("/api/admin/issues", handleCreateIssue(deps.Issues))
+			admin.Get("/api/admin/issues", handleListIssues(deps.Issues))
+		}
+		if deps.MR != nil {
+			admin.Get("/api/admin/mrs", handleListMRs(deps.MR))
 		}
 	})
 	r.Group(func(agent chi.Router) {

@@ -20,28 +20,28 @@
 
 **文件：** `server/internal/matching/definition.go`、`definition_test.go`
 
-- [ ] 先测试 role、capabilities、max_concurrency、project_access、skills、mcps 和 memory 摘要加载。
-- [ ] 测试路径越界、符号链接、无效名称和包含密钥字段时拒绝加载。
-- [ ] 实现受限 YAML 字段解析和目录清单读取，不增加密钥依赖。
-- [ ] 运行 `go test ./internal/matching -run TestLoadDefinition`。
+- [x] 先测试 role、capabilities、max_concurrency、project_access、skills、mcps 和 memory 摘要加载。
+- [x] 测试路径越界、符号链接、无效名称和包含密钥字段时拒绝加载。
+- [x] 实现受限 YAML 字段解析和目录清单读取，不增加密钥依赖。
+- [x] 运行 `go test ./internal/matching -run TestLoadDefinition`。
 
 ### Task 2：硬条件过滤和解释评分
 
 **文件：** `server/internal/matching/matcher.go`、`matcher_test.go`
 
-- [ ] 测试离线、能力、Skill、MCP、项目权限和并发上限过滤。
-- [ ] 测试记忆命中、空闲度和能力冗余评分及稳定排序。
-- [ ] 实现 `Match(workItem, agents) MatchResult`，返回候选和拒绝理由。
-- [ ] 运行 matching 包测试。
+- [x] 测试离线、能力、Skill、MCP、项目权限和并发上限过滤。
+- [x] 测试记忆命中、空闲度和能力冗余评分及稳定排序。
+- [x] 实现 `Match(workItem, agents) MatchResult`，返回候选和拒绝理由。
+- [x] 运行 matching 包测试。
 
 ### Task 3：匹配决策持久化和团队负责人判断
 
 **文件：** `server/internal/db/migrations.go`、`server/internal/assignments/`
 
-- [ ] 测试选择结果、评分、拒绝理由、负责人决策和幂等写入。
-- [ ] 新增匹配决策与 assignment 表。
-- [ ] 多工作包共享依赖、多人修改或高风险时设置项目负责人。
-- [ ] 没有候选时创建非密钥 Agent 定义并进入 `blocked: missing_config`。
+- [x] 测试选择结果、评分、拒绝理由、负责人决策和幂等写入。
+- [x] 新增匹配决策与 assignment 表。
+- [x] 多工作包共享依赖、多人修改或高风险时设置项目负责人。
+- [x] 没有候选时创建非密钥 Agent 定义并进入 `blocked: missing_config`。
 
 ### Task 4：自动匹配、恢复和管理员覆盖 API
 

@@ -9,3 +9,4 @@ agents/
 server/wanxiang
 *.log
 .DS_Store
+.worktrees/

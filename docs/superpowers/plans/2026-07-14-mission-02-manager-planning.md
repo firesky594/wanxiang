@@ -25,9 +25,9 @@
 - Create: `server/internal/planning/validate.go`
 - Create: `server/internal/planning/validate_test.go`
 
-- [ ] Write failing tests for valid plans, duplicate keys, missing acceptance criteria, unknown dependencies, and dependency cycles.
-- [ ] Implement `ParsePlan([]byte) (Plan, error)` with deterministic validation errors.
-- [ ] Run `go test ./internal/planning -run TestParsePlan`.
+- [x] Write failing tests for valid plans, duplicate keys, missing acceptance criteria, unknown dependencies, and dependency cycles.
+- [x] Implement `ParsePlan([]byte) (Plan, error)` with deterministic validation errors.
+- [x] Run `go test ./internal/planning -run TestParsePlan`.
 
 ### Task 2: Manager planning request boundary
 
@@ -37,10 +37,10 @@
 - Create: `server/internal/planning/prompt.go`
 - Create: `server/internal/planning/prompt_test.go`
 
-- [ ] Add failing tests for manager chat and prompt content without API keys.
-- [ ] Add `agents.Service.ChatAgent` using existing runtime config and Provider registry.
-- [ ] Build the manager system/user messages from task data and `agents/manager/system_prompt.md`.
-- [ ] Run focused agent and planning tests.
+- [x] Add failing tests for manager chat and prompt content without API keys.
+- [x] Add `agents.Service.ChatAgent` using existing runtime config and Provider registry.
+- [x] Build the manager system/user messages from task data and `agents/manager/system_prompt.md`.
+- [x] Run focused agent and planning tests.
 
 ### Task 3: Transactional and idempotent planning service
 
@@ -49,10 +49,10 @@
 - Create: `server/internal/planning/service_test.go`
 - Modify: `server/internal/tasks/service.go`
 
-- [ ] Write failing tests for created-task planning, persisted steps/edges, duplicate invocation, and invalid output blocking.
-- [ ] Implement task claim, model call, validation, transactional persistence, and runtime events.
-- [ ] Ensure a second invocation returns the accepted plan without duplicate rows or model calls.
-- [ ] Run `go test ./internal/planning`.
+- [x] Write failing tests for created-task planning, persisted steps/edges, duplicate invocation, and invalid output blocking.
+- [x] Implement task claim, model call, validation, transactional persistence, and runtime events.
+- [x] Ensure a second invocation returns the accepted plan without duplicate rows or model calls.
+- [x] Run `go test ./internal/planning`.
 
 ### Task 4: Lifecycle worker and recovery
 
@@ -61,19 +61,19 @@
 - Create: `server/internal/planning/worker_test.go`
 - Modify: `server/internal/app/app.go`
 
-- [ ] Write failing tests that the worker consumes created tasks and stops with application shutdown.
-- [ ] Wire the worker after manager readiness without making app startup fail when manager configuration is missing.
-- [ ] Publish planning started, completed, and blocked events.
-- [ ] Run app and planning package tests.
+- [x] Write failing tests that the worker consumes created tasks and stops with application shutdown.
+- [x] Wire the worker after manager readiness without making app startup fail when manager configuration is missing.
+- [x] Publish planning started, completed, and blocked events.
+- [x] Run app and planning package tests.
 
 ### Task 5: Verification and Mission handoff
 
 **Files:**
 - Modify: `wanxiangAgentWorkMission.md`
 
-- [ ] Run `gofmt` and `go test ./...`.
-- [ ] Run `go build -o wanxiang ./cmd/wanxiang` and record whether the running backend needs replacement and restart.
-- [ ] Run frontend tests and build to catch API contract regressions.
-- [ ] Record whether this Mission changes Web code or API contracts and whether `web/dist` must be rebuilt for deployment.
-- [ ] Mark M02 complete with commits, tests, remaining risk, and M03 next action.
+- [x] Run `gofmt` and `go test ./...`.
+- [x] Run `go build -o wanxiang ./cmd/wanxiang` and record whether the running backend needs replacement and restart.
+- [x] Run frontend tests and build to catch API contract regressions.
+- [x] Record whether this Mission changes Web code or API contracts and whether `web/dist` must be rebuilt for deployment.
+- [x] Mark M02 complete with commits, tests, remaining risk, and M03 next action.
 - [ ] Merge to `main`, verify again, and push `origin/main`.

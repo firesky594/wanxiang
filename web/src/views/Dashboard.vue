@@ -6,7 +6,7 @@
         <span>Wanxiang Agent</span>
       </RouterLink>
       <nav class="nav">
-        <RouterLink to="/init-manager"><el-icon><Key /></el-icon>总管</RouterLink>
+        <RouterLink to="/agents"><el-icon><Key /></el-icon>Agent 配置</RouterLink>
         <RouterLink to="/agents"><el-icon><Connection /></el-icon>Agents</RouterLink>
         <RouterLink to="/mrs"><el-icon><Share /></el-icon>MR</RouterLink>
         <RouterLink to="/issues"><el-icon><Warning /></el-icon>Issue</RouterLink>

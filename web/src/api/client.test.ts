@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { api } from './client'
+import { api, saveAgentConfig } from './client'
 import { useAuthStore } from '../stores/auth'
 
 describe('authenticated API client', () => {
@@ -43,5 +43,24 @@ describe('authenticated API client', () => {
     const [, init] = vi.mocked(fetch).mock.calls[0]
     expect(init?.method).toBe('POST')
     expect(init?.body).toBe(JSON.stringify({ username: 'admin', password: 'secret123' }))
+  })
+
+  it('saves an agent provider configuration without putting the name in the body', async () => {
+    await saveAgentConfig('worker 1', {
+      provider_type: 'deepseek',
+      base_url: 'https://api.deepseek.com',
+      model: 'deepseek-test',
+      api_key: 'replacement-key'
+    })
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/admin/agents/worker%201/config')
+    expect(init?.method).toBe('PUT')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      provider_type: 'deepseek',
+      base_url: 'https://api.deepseek.com',
+      model: 'deepseek-test',
+      api_key: 'replacement-key'
+    })
   })
 })

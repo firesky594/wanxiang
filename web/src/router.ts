@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import InitManager from './views/InitManager.vue'
 import Dashboard from './views/Dashboard.vue'
 import Agents from './views/Agents.vue'
 import TaskDetail from './views/TaskDetail.vue'
@@ -13,7 +12,7 @@ export const router = createRouter({
     { path: '/', redirect: '/dashboard' },
     { path: '/login', component: AdminAccess, meta: { public: true } },
     { path: '/bootstrap', component: AdminAccess, meta: { public: true } },
-    { path: '/init-manager', component: InitManager },
+    { path: '/init-manager', redirect: '/agents' },
     { path: '/dashboard', component: Dashboard },
     { path: '/agents', component: Agents },
     { path: '/tasks/:id', component: TaskDetail },

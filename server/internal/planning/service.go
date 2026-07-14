@@ -47,6 +47,11 @@ func (s *Service) PlanTask(ctx context.Context, taskID int64) (Plan, error) {
 	if changed != 1 {
 		return Plan{}, errors.New("task planning was claimed concurrently")
 	}
+	startedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	startedPayload, _ := json.Marshal(map[string]any{"task_id": taskID})
+	if _, err := s.db.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,'task.planning.started','manager',?,?)`, taskID, string(startedPayload), startedAt); err != nil {
+		return Plan{}, s.block(ctx, taskID, "planning failed: could not record start", err)
+	}
 	messages, err := BuildMessages(filepath.Join(s.cfg.AgentDir, "manager"), task)
 	if err != nil {
 		return Plan{}, s.block(ctx, taskID, "planning failed: manager prompt unavailable", err)

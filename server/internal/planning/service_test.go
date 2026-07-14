@@ -47,6 +47,13 @@ func TestServicePlansCreatedTaskTransactionallyAndIdempotently(t *testing.T) {
 	if status != "planned" || summary != "deliver" {
 		t.Fatalf("status=%q summary=%q", status, summary)
 	}
+	var eventTypes string
+	if err := conn.QueryRow(`select group_concat(event_type, ',') from runtime_events where task_id=? order by id`, taskID).Scan(&eventTypes); err != nil {
+		t.Fatal(err)
+	}
+	if eventTypes != "task.planning.started,task.planning.completed" {
+		t.Fatalf("events=%q", eventTypes)
+	}
 }
 
 func TestServiceBlocksInvalidPlanningOutputWithoutLeakingIt(t *testing.T) {

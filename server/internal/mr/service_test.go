@@ -252,11 +252,11 @@ func setManagerReady(t *testing.T, cfg config.Config, conn *sql.DB) *agents.Serv
 	if _, err := svc.EnsureManager(context.Background()); err != nil {
 		t.Fatalf("EnsureManager: %v", err)
 	}
-	if err := svc.SaveManagerSecret(context.Background(), "MANAGER_API_KEY", "test-key"); err != nil {
-		t.Fatalf("SaveManagerSecret: %v", err)
+	if _, err := svc.SaveAgentConfig(context.Background(), agents.AgentConfigInput{Name: "manager", ProviderType: "openai", Model: "test-model", APIKey: "test-key"}); err != nil {
+		t.Fatalf("SaveAgentConfig: %v", err)
 	}
-	if _, err := svc.EnsureManager(context.Background()); err != nil {
-		t.Fatalf("EnsureManager ready: %v", err)
+	if _, err := conn.Exec(`update agent_registry set status='online' where name='manager'`); err != nil {
+		t.Fatalf("mark manager online: %v", err)
 	}
 	return svc
 }

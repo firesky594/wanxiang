@@ -38,7 +38,7 @@ func New(cfg config.Config) (*App, error) {
 	bus := events.NewBus(conn)
 	agentSvc := agents.NewService(cfg, conn, bus)
 	launcher := agents.NewLauncher(agentSvc, bus)
-	if _, err := launcher.Start(context.Background()); err != nil {
+	if _, err := launcher.StartAll(context.Background()); err != nil {
 		conn.Close()
 		return nil, err
 	}

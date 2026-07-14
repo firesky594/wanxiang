@@ -2,6 +2,9 @@ package agents
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +13,99 @@ import (
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/testutil"
 )
+
+func TestSaveAgentConfigStoresSecretPrivatelyAndPreservesIt(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn)
+
+	input := AgentConfigInput{Name: "worker-1", ProviderType: "deepseek", Model: "deepseek-test", APIKey: "secret-one"}
+	if _, err := svc.SaveAgentConfig(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	envPath := filepath.Join(cfg.AgentDir, "worker-1", "env")
+	info, err := os.Stat(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode=%o", info.Mode().Perm())
+	}
+
+	input.APIKey = ""
+	input.Model = "deepseek-updated"
+	view, err := svc.SaveAgentConfig(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.SecretConfigured || view.BaseURL != "https://api.deepseek.com" || view.Model != "deepseek-updated" {
+		t.Fatalf("view=%+v", view)
+	}
+	body, _ := os.ReadFile(envPath)
+	if !strings.Contains(string(body), "AGENT_API_KEY=secret-one") {
+		t.Fatalf("secret was not preserved: %s", body)
+	}
+	if strings.Contains(string(body), "secret-one\nAGENT_API_KEY") {
+		t.Fatal("secret was duplicated")
+	}
+}
+
+func TestProbeAgentSelectsConfiguredProviderAndPersistsStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"OK"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn)
+	_, err := svc.SaveAgentConfig(context.Background(), AgentConfigInput{Name: "worker-1", ProviderType: "deepseek", BaseURL: server.URL, Model: "deepseek-test", APIKey: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.ProbeAgent(context.Background(), "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Status != "online" {
+		t.Fatalf("view=%+v", view)
+	}
+	var status, model string
+	if err := conn.QueryRow(`select status,current_model from agent_registry where name='worker-1'`).Scan(&status, &model); err != nil {
+		t.Fatal(err)
+	}
+	if status != "online" || model != "deepseek-test" {
+		t.Fatalf("status=%q model=%q", status, model)
+	}
+}
+
+func TestAgentConfigRejectsUnsupportedProviderAndDoesNotExposeSecret(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn)
+	if _, err := svc.SaveAgentConfig(context.Background(), AgentConfigInput{Name: "worker-1", ProviderType: "other", Model: "model", APIKey: "secret"}); err == nil {
+		t.Fatal("unsupported provider should fail")
+	}
+	if _, err := svc.SaveAgentConfig(context.Background(), AgentConfigInput{Name: "worker-1", ProviderType: "openai", Model: "model", APIKey: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	views, err := svc.ListAgentConfigs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || !views[0].SecretConfigured {
+		t.Fatalf("views=%+v", views)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", views), "secret") {
+		t.Fatalf("view leaked secret: %+v", views)
+	}
+}
 
 func TestEnsureManagerCreatesTemplateAndBlocksWhenSecretMissing(t *testing.T) {
 	root := t.TempDir()
@@ -24,7 +120,7 @@ func TestEnsureManagerCreatesTemplateAndBlocksWhenSecretMissing(t *testing.T) {
 	if status.Status != "blocked: missing_secret" {
 		t.Fatalf("status=%q", status.Status)
 	}
-	if len(status.MissingEnv) != 1 || status.MissingEnv[0] != "MANAGER_API_KEY" {
+	if strings.Join(status.MissingEnv, ",") != "AGENT_PROVIDER_TYPE,AGENT_API_KEY,AGENT_MODEL" {
 		t.Fatalf("MissingEnv=%v", status.MissingEnv)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.AgentDir, "manager", "agent.yaml")); err != nil {
@@ -82,7 +178,7 @@ func TestHeartbeatAndTokenUsagePublishPersistedEvents(t *testing.T) {
 	}
 }
 
-func TestSaveManagerSecretUnblocksManager(t *testing.T) {
+func TestLegacyManagerSecretStillRequiresProviderAndModel(t *testing.T) {
 	root := t.TempDir()
 	cfg, _ := config.Load(root)
 	conn := testutil.OpenDB(t)
@@ -97,7 +193,10 @@ func TestSaveManagerSecretUnblocksManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureManager second: %v", err)
 	}
-	if status.Status != "online" {
+	if status.Status != "blocked: missing_secret" {
 		t.Fatalf("status=%q", status.Status)
+	}
+	if strings.Join(status.MissingEnv, ",") != "AGENT_PROVIDER_TYPE,AGENT_MODEL" {
+		t.Fatalf("MissingEnv=%v", status.MissingEnv)
 	}
 }

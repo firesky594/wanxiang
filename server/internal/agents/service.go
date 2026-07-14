@@ -4,21 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/events"
 	"wanxiang-agent/server/internal/files"
+	"wanxiang-agent/server/internal/providers"
 )
 
 type Service struct {
-	cfg config.Config
-	db  *sql.DB
-	bus *events.Bus
+	cfg              config.Config
+	db               *sql.DB
+	bus              *events.Bus
+	providerRegistry *providers.Registry
 }
 
 var agentNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
@@ -28,7 +34,7 @@ func NewService(cfg config.Config, db *sql.DB, buses ...*events.Bus) *Service {
 	if len(buses) > 0 && buses[0] != nil {
 		bus = buses[0]
 	}
-	return &Service{cfg: cfg, db: db, bus: bus}
+	return &Service{cfg: cfg, db: db, bus: bus, providerRegistry: providers.NewRegistry(&http.Client{Timeout: 20 * time.Second})}
 }
 
 func (s *Service) EnsureManager(ctx context.Context) (ManagerStatus, error) {
@@ -38,7 +44,7 @@ func (s *Service) EnsureManager(ctx context.Context) (ManagerStatus, error) {
 	}
 	files := map[string]string{
 		".gitignore":       "env\nlogs/runtime/*.log\n",
-		"env.example":      "MANAGER_API_KEY=\n",
+		"env.example":      "AGENT_PROVIDER_TYPE=openai\nAGENT_API_KEY=\nAGENT_BASE_URL=https://api.openai.com/v1\nAGENT_MODEL=\n",
 		"system_prompt.md": "# Manager Agent\n\nYou plan tasks, manage agents, and enforce human blocking issues.\n",
 		"agent.yaml":       managerYAML(),
 	}
@@ -55,10 +61,13 @@ func (s *Service) EnsureManager(ctx context.Context) (ManagerStatus, error) {
 			return ManagerStatus{}, err
 		}
 	}
-	missing := missingEnv(filepath.Join(dir, "env"), []string{"MANAGER_API_KEY"})
+	missing := missingAgentConfig(filepath.Join(dir, "env"))
 	status := "online"
 	if len(missing) > 0 {
 		status = "blocked: missing_secret"
+	} else {
+		status = "configured"
+		_ = s.db.QueryRowContext(ctx, `select status from agent_registry where name='manager'`).Scan(&status)
 	}
 	_, err := s.db.ExecContext(ctx, `insert into agent_registry(name, role, dir, status, last_heartbeat) values('manager','manager',?,?,datetime('now'))
 		on conflict(name) do update set status=excluded.status, dir=excluded.dir, last_heartbeat=datetime('now')`, dir, status)
@@ -82,8 +91,172 @@ func (s *Service) SaveManagerSecret(ctx context.Context, key, value string) erro
 		return err
 	}
 	envPath := filepath.Join(dir, "env")
-	line := key + "=" + value + "\n"
-	return os.WriteFile(envPath, []byte(line), 0o600)
+	values := readEnv(envPath)
+	values[key] = value
+	keys := make([]string, 0, len(values))
+	for envKey := range values {
+		keys = append(keys, envKey)
+	}
+	sort.Strings(keys)
+	var content strings.Builder
+	for _, envKey := range keys {
+		content.WriteString(envKey + "=" + values[envKey] + "\n")
+	}
+	return os.WriteFile(envPath, []byte(content.String()), 0o600)
+}
+
+func (s *Service) SaveAgentConfig(ctx context.Context, input AgentConfigInput) (AgentConfigView, error) {
+	if err := ValidateName(input.Name); err != nil {
+		return AgentConfigView{}, err
+	}
+	input.ProviderType = strings.ToLower(strings.TrimSpace(input.ProviderType))
+	if _, err := s.providerRegistry.Get(input.ProviderType); err != nil {
+		return AgentConfigView{}, err
+	}
+	input.Model = strings.TrimSpace(input.Model)
+	if input.Model == "" {
+		return AgentConfigView{}, errors.New("model is required")
+	}
+	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	if input.BaseURL == "" {
+		input.BaseURL = providers.DefaultBaseURL(input.ProviderType)
+	}
+	parsed, err := url.Parse(input.BaseURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return AgentConfigView{}, errors.New("base_url must be an absolute HTTP or HTTPS URL")
+	}
+	for _, value := range []string{input.ProviderType, input.BaseURL, input.Model, input.APIKey} {
+		if strings.ContainsAny(value, "\r\n") {
+			return AgentConfigView{}, errors.New("configuration values cannot contain newlines")
+		}
+	}
+	dir, err := s.agentBase(input.Name)
+	if err != nil {
+		return AgentConfigView{}, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return AgentConfigView{}, err
+	}
+	existing := readEnv(filepath.Join(dir, "env"))
+	apiKey := strings.TrimSpace(input.APIKey)
+	if apiKey == "" {
+		apiKey = existing["AGENT_API_KEY"]
+		if apiKey == "" && input.Name == "manager" {
+			apiKey = existing["MANAGER_API_KEY"]
+		}
+	}
+	if apiKey == "" {
+		return AgentConfigView{}, errors.New("api_key is required for a new agent configuration")
+	}
+	content := fmt.Sprintf("AGENT_PROVIDER_TYPE=%s\nAGENT_API_KEY=%s\nAGENT_BASE_URL=%s\nAGENT_MODEL=%s\n", input.ProviderType, apiKey, input.BaseURL, input.Model)
+	if err := os.WriteFile(filepath.Join(dir, "env"), []byte(content), 0o600); err != nil {
+		return AgentConfigView{}, err
+	}
+	if err := os.Chmod(filepath.Join(dir, "env"), 0o600); err != nil {
+		return AgentConfigView{}, err
+	}
+	role := "agent"
+	if input.Name == "manager" {
+		role = "manager"
+	}
+	_, err = s.db.ExecContext(ctx, `insert into agent_registry(name,role,dir,status,last_heartbeat,current_model) values(?,?,?,'configured',datetime('now'),?)
+		on conflict(name) do update set role=excluded.role,dir=excluded.dir,status=excluded.status,last_heartbeat=excluded.last_heartbeat,current_model=excluded.current_model`, input.Name, role, dir, input.Model)
+	if err != nil {
+		return AgentConfigView{}, err
+	}
+	return AgentConfigView{Name: input.Name, ProviderType: input.ProviderType, BaseURL: input.BaseURL, Model: input.Model, SecretConfigured: true, Status: "configured"}, nil
+}
+
+func (s *Service) GetAgentConfig(ctx context.Context, name string) (AgentConfigView, error) {
+	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
+	return runtimeCfg.AgentConfigView, err
+}
+
+func (s *Service) ListAgentConfigs(ctx context.Context) ([]AgentConfigView, error) {
+	entries, err := os.ReadDir(s.cfg.AgentDir)
+	if os.IsNotExist(err) {
+		return []AgentConfigView{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	views := make([]AgentConfigView, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || ValidateName(entry.Name()) != nil {
+			continue
+		}
+		view, err := s.GetAgentConfig(ctx, entry.Name())
+		if err != nil {
+			values := readEnv(filepath.Join(s.cfg.AgentDir, entry.Name(), "env"))
+			providerType := strings.ToLower(values["AGENT_PROVIDER_TYPE"])
+			baseURL := values["AGENT_BASE_URL"]
+			if baseURL == "" {
+				baseURL = providers.DefaultBaseURL(providerType)
+			}
+			view = AgentConfigView{Name: entry.Name(), ProviderType: providerType, BaseURL: baseURL, Model: values["AGENT_MODEL"], SecretConfigured: values["AGENT_API_KEY"] != "" || (entry.Name() == "manager" && values["MANAGER_API_KEY"] != ""), Status: "blocked: missing_config"}
+		}
+		views = append(views, view)
+	}
+	sort.Slice(views, func(i, j int) bool { return views[i].Name < views[j].Name })
+	return views, nil
+}
+
+func (s *Service) ProbeAgent(ctx context.Context, name string) (AgentConfigView, error) {
+	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
+	if err != nil {
+		return AgentConfigView{}, err
+	}
+	provider, err := s.providerRegistry.Get(runtimeCfg.ProviderType)
+	if err == nil {
+		_, err = provider.Chat(ctx, providers.Config{APIKey: runtimeCfg.APIKey, BaseURL: runtimeCfg.BaseURL, Model: runtimeCfg.Model}, []providers.Message{{Role: "user", Content: "Reply OK."}}, 1)
+	}
+	status := "online"
+	lastError := ""
+	if err != nil {
+		status = "blocked: provider_error"
+		lastError = err.Error()
+	}
+	role := "agent"
+	if name == "manager" {
+		role = "manager"
+	}
+	dir, _ := s.agentBase(name)
+	_, dbErr := s.db.ExecContext(ctx, `insert into agent_registry(name,role,dir,status,last_heartbeat,current_model) values(?,?,?,?,datetime('now'),?)
+		on conflict(name) do update set status=excluded.status,last_heartbeat=excluded.last_heartbeat,current_model=excluded.current_model`, name, role, dir, status, runtimeCfg.Model)
+	if dbErr != nil {
+		return AgentConfigView{}, dbErr
+	}
+	view := runtimeCfg.AgentConfigView
+	view.Status = status
+	view.LastError = lastError
+	return view, err
+}
+
+func (s *Service) loadRuntimeConfig(ctx context.Context, name string) (runtimeConfig, error) {
+	dir, err := s.agentBase(name)
+	if err != nil {
+		return runtimeConfig{}, err
+	}
+	values := readEnv(filepath.Join(dir, "env"))
+	providerType := strings.ToLower(strings.TrimSpace(values["AGENT_PROVIDER_TYPE"]))
+	apiKey := strings.TrimSpace(values["AGENT_API_KEY"])
+	if apiKey == "" && name == "manager" {
+		apiKey = strings.TrimSpace(values["MANAGER_API_KEY"])
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(values["AGENT_BASE_URL"]), "/")
+	if baseURL == "" {
+		baseURL = providers.DefaultBaseURL(providerType)
+	}
+	model := strings.TrimSpace(values["AGENT_MODEL"])
+	if providerType == "" || apiKey == "" || model == "" {
+		return runtimeConfig{}, errors.New("agent provider_type, api_key, and model are required")
+	}
+	if _, err := s.providerRegistry.Get(providerType); err != nil {
+		return runtimeConfig{}, err
+	}
+	status := "configured"
+	_ = s.db.QueryRowContext(ctx, `select status from agent_registry where name=?`, name).Scan(&status)
+	return runtimeConfig{AgentConfigView: AgentConfigView{Name: name, ProviderType: providerType, BaseURL: baseURL, Model: model, SecretConfigured: true, Status: status}, APIKey: apiKey}, nil
 }
 
 func (s *Service) Heartbeat(ctx context.Context, input HeartbeatInput) error {
@@ -196,6 +369,40 @@ func missingEnv(path string, keys []string) []string {
 	return missing
 }
 
+func readEnv(path string) map[string]string {
+	values := map[string]string{}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return values
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			values[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	return values
+}
+
+func missingAgentConfig(path string) []string {
+	values := readEnv(path)
+	missing := []string{}
+	if values["AGENT_PROVIDER_TYPE"] == "" {
+		missing = append(missing, "AGENT_PROVIDER_TYPE")
+	}
+	if values["AGENT_API_KEY"] == "" && values["MANAGER_API_KEY"] == "" {
+		missing = append(missing, "AGENT_API_KEY")
+	}
+	if values["AGENT_MODEL"] == "" {
+		missing = append(missing, "AGENT_MODEL")
+	}
+	return missing
+}
+
 func managerYAML() string {
 	return `role: manager
 capabilities:
@@ -203,11 +410,15 @@ capabilities:
   - review
   - agent-governance
 required_env:
-  - MANAGER_API_KEY
+  - AGENT_PROVIDER_TYPE
+  - AGENT_API_KEY
+  - AGENT_MODEL
 model_profiles:
   planning:
-    provider_env: MANAGER_PROVIDER
-    api_key_env: MANAGER_API_KEY
+    provider_env: AGENT_PROVIDER_TYPE
+    api_key_env: AGENT_API_KEY
+    base_url_env: AGENT_BASE_URL
+    model_env: AGENT_MODEL
 autonomy:
   update_non_secret_agent_config: true
 git_policy:

@@ -174,6 +174,47 @@ func TestProtectedAdminRouteRejectsRandomHeaderAndAcceptsPersistedSession(t *tes
 	}
 }
 
+func TestAdminAgentConfigSavesAndNeverReturnsAPIKey(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"OK"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer provider.Close()
+
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	seedAdmin(t, conn, "admin", "secret123")
+	svc := agents.NewService(cfg, conn)
+	router := NewRouter(Dependencies{DB: conn, Agents: svc})
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/admin/login", bytes.NewBufferString(`{"username":"admin","password":"secret123"}`))
+	loginRec := httptest.NewRecorder()
+	router.ServeHTTP(loginRec, loginReq)
+	var login struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(loginRec.Body.Bytes(), &login); err != nil {
+		t.Fatal(err)
+	}
+
+	body := fmt.Sprintf(`{"provider_type":"deepseek","base_url":%q,"model":"deepseek-test","api_key":"never-return-this"}`, provider.URL)
+	putReq := httptest.NewRequest(http.MethodPut, "/api/admin/agents/worker-1/config", bytes.NewBufferString(body))
+	putReq.Header.Set("Authorization", "Bearer "+login.Token)
+	putRec := httptest.NewRecorder()
+	router.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK || strings.Contains(putRec.Body.String(), "never-return-this") {
+		t.Fatalf("put status=%d body=%s", putRec.Code, putRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/admin/agents", nil)
+	listReq.Header.Set("Authorization", "Bearer "+login.Token)
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK || strings.Contains(listRec.Body.String(), "never-return-this") || !strings.Contains(listRec.Body.String(), `"secret_configured":true`) {
+		t.Fatalf("list status=%d body=%s", listRec.Code, listRec.Body.String())
+	}
+}
+
 func TestAgentRouteUsesAuthenticatedAgentIdentity(t *testing.T) {
 	root := t.TempDir()
 	cfg, _ := config.Load(root)
@@ -237,11 +278,11 @@ func TestMergeRouteUsesAuthenticatedManagerIdentity(t *testing.T) {
 	if _, err := agentSvc.EnsureManager(ctx); err != nil {
 		t.Fatalf("EnsureManager: %v", err)
 	}
-	if err := agentSvc.SaveManagerSecret(ctx, "MANAGER_API_KEY", "test-key"); err != nil {
-		t.Fatalf("SaveManagerSecret: %v", err)
+	if _, err := agentSvc.SaveAgentConfig(ctx, agents.AgentConfigInput{Name: "manager", ProviderType: "openai", Model: "test-model", APIKey: "test-key"}); err != nil {
+		t.Fatalf("SaveAgentConfig: %v", err)
 	}
-	if _, err := agentSvc.EnsureManager(ctx); err != nil {
-		t.Fatalf("EnsureManager ready: %v", err)
+	if _, err := conn.Exec(`update agent_registry set status='online' where name='manager'`); err != nil {
+		t.Fatalf("mark manager online: %v", err)
 	}
 	seedAgentToken(t, conn, "backend-dev", "backend-token")
 	seedAgentToken(t, conn, "manager", "manager-token")

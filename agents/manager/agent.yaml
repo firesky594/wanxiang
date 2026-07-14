@@ -4,11 +4,15 @@ capabilities:
   - review
   - agent-governance
 required_env:
-  - MANAGER_API_KEY
+  - AGENT_PROVIDER_TYPE
+  - AGENT_API_KEY
+  - AGENT_MODEL
 model_profiles:
   planning:
-    provider_env: MANAGER_PROVIDER
-    api_key_env: MANAGER_API_KEY
+    provider_env: AGENT_PROVIDER_TYPE
+    api_key_env: AGENT_API_KEY
+    base_url_env: AGENT_BASE_URL
+    model_env: AGENT_MODEL
 autonomy:
   update_non_secret_agent_config: true
 git_policy:

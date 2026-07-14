@@ -34,6 +34,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		if deps.Agents != nil {
 			admin.Get("/api/admin/manager/status", handleManagerStatus(deps.Agents))
 			admin.Post("/api/admin/manager/secrets", handleManagerSecrets(deps.Agents, deps.Launcher))
+			admin.Get("/api/admin/agents", handleAgentConfigs(deps.Agents))
+			admin.Put("/api/admin/agents/{name}/config", handleSaveAgentConfig(deps.Agents, deps.Launcher))
+			admin.Post("/api/admin/agents/{name}/probe", handleProbeAgent(deps.Agents, deps.Launcher))
 		}
 		if deps.Bus != nil {
 			admin.Get("/api/events/stream", handleEventStream(deps.Bus))

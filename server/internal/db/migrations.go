@@ -24,6 +24,9 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`create table if not exists token_usage (id integer primary key, task_id integer, step_id integer, agent_name text not null, model text not null, input_tokens integer not null, output_tokens integer not null, created_at text not null)`,
 		`create table if not exists remote_sync_jobs (id integer primary key, project_id integer not null, mr_id integer, kind text not null, status text not null, requested_by text not null, created_at text not null, completed_at text)`,
 		`create table if not exists audit_logs (id integer primary key, actor text not null, action text not null, target text not null, payload_json text not null, created_at text not null)`,
+		`create table if not exists agent_match_decisions (id integer primary key, task_id integer not null, step_id integer not null, selected_agent text, score real not null default 0, reasons_json text not null, rejections_json text not null, created_by text not null, status text not null, created_at text not null)`,
+		`create table if not exists task_assignments (id integer primary key, task_id integer not null, step_id integer not null unique, agent_name text not null, reports_to text, status text not null, decision_id integer not null, created_at text not null)`,
+		`create table if not exists team_decisions (id integer primary key, task_id integer not null unique, project_lead text, requires_lead integer not null default 0, reason text not null, created_at text not null)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {

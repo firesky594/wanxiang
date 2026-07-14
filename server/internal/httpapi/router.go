@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"wanxiang-agent/server/internal/agents"
+	"wanxiang-agent/server/internal/assignments"
 	"wanxiang-agent/server/internal/events"
 	"wanxiang-agent/server/internal/issues"
 	"wanxiang-agent/server/internal/mr"
@@ -13,13 +14,14 @@ import (
 )
 
 type Dependencies struct {
-	DB       *sql.DB
-	Agents   *agents.Service
-	Launcher *agents.Launcher
-	Bus      *events.Bus
-	Tasks    *tasks.Service
-	MR       *mr.Service
-	Issues   *issues.Service
+	DB          *sql.DB
+	Agents      *agents.Service
+	Launcher    *agents.Launcher
+	Bus         *events.Bus
+	Tasks       *tasks.Service
+	MR          *mr.Service
+	Issues      *issues.Service
+	Assignments *assignments.Service
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -50,6 +52,10 @@ func NewRouter(deps Dependencies) http.Handler {
 			if deps.Bus != nil {
 				admin.Get("/api/admin/tasks/{id}/events", handleListEvents(deps.Bus))
 			}
+		}
+		if deps.Assignments != nil {
+			admin.Get("/api/admin/tasks/{id}/match", handleGetTaskMatch(deps.Assignments))
+			admin.Put("/api/admin/tasks/{id}/match", handleOverrideTaskMatch(deps.Assignments))
 		}
 		if deps.Issues != nil {
 			admin.Post("/api/admin/issues", handleCreateIssue(deps.Issues))

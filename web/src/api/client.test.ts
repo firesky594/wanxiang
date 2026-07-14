@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { api, saveAgentConfig } from './client'
+import { api, overrideTaskMatch, saveAgentConfig } from './client'
 import { useAuthStore } from '../stores/auth'
 
 describe('authenticated API client', () => {
@@ -62,5 +62,14 @@ describe('authenticated API client', () => {
       model: 'deepseek-test',
       api_key: 'replacement-key'
     })
+  })
+
+  it('sends an explicit administrator assignment override', async () => {
+	await overrideTaskMatch(12, 34, 'worker-a')
+
+	const [url, init] = vi.mocked(fetch).mock.calls[0]
+	expect(url).toBe('/api/admin/tasks/12/match')
+	expect(init?.method).toBe('PUT')
+	expect(JSON.parse(String(init?.body))).toEqual({ step_id: 34, agent_name: 'worker-a' })
   })
 })

@@ -32,6 +32,13 @@ tests:
   - command: go test ./internal/tasks
     result: passed
 risks: []
+frontend_build_required: false
+frontend_build_result: not_required
+backend_build_required: true
+backend_build_result: passed
+backend_restart_required: true
+backend_restarted: false
+backend_restart_reason: 尚未替换运行中的后端二进制
 next_action: 下一项可立即执行的动作
 ```
 

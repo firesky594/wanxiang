@@ -72,6 +72,8 @@
 - Modify: `wanxiangAgentWorkMission.md`
 
 - [ ] Run `gofmt` and `go test ./...`.
+- [ ] Run `go build -o wanxiang ./cmd/wanxiang` and record whether the running backend needs replacement and restart.
 - [ ] Run frontend tests and build to catch API contract regressions.
+- [ ] Record whether this Mission changes Web code or API contracts and whether `web/dist` must be rebuilt for deployment.
 - [ ] Mark M02 complete with commits, tests, remaining risk, and M03 next action.
 - [ ] Merge to `main`, verify again, and push `origin/main`.

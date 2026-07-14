@@ -630,3 +630,54 @@ risks:
 - 不在本文档中记录真实密钥、令牌、用户隐私或内部服务凭据。
 - 每次修改通过 Git 提交保留原因，方便其他 Agent 追溯设计演变。
 - 每完成一个 Mission，执行者必须更新 `wanxiangAgentWorkMission.md` 中的状态、提交、测试证据、剩余风险和下一步。
+
+## 17. 提交、构建和服务重启规则
+
+### 17.1 Git 提交说明
+
+- Git commit 的主题和正文使用中文，技术名称、文件名、命令和协议名可以保留英文。
+- 提交主题说明本次提交完成的行为，例如 `功能：增加任务规划状态机`、`测试：覆盖规划失败恢复`。
+- 一个提交只包含同一工作包内可独立验证的修改。执行者不能把无关格式化、临时文件或其他人的修改带入提交。
+- checkpoint 提交也使用中文，格式为 `检查点(<step-id>)：<当前进度>`。
+
+### 17.2 前端构建判断
+
+每次完成工作包或 Mission 后，执行者必须检查变更是否涉及以下内容：
+
+- `web/src/`、`web/package.json`、`web/package-lock.json`、`web/vite.config.ts`、`web/tsconfig.json` 或前端运行环境配置。
+- Go API 响应结构、字段名、路由或认证方式发生变化，并且 Web 管理台依赖这些接口。
+
+命中任一条件时必须执行 `npm test -- --run` 和 `npm run build`。生产部署使用 `web/dist` 时，执行者还要确认构建产物已经生成到实际部署目录。仓库忽略 `web/dist` 时不得强行提交产物，但必须在交接记录中写明构建命令、结果、产物路径和是否完成部署替换。
+
+没有关联前端时，交接记录写明 `frontend_build_required: false` 和判断依据，不能省略该项。
+
+### 17.3 Go 后端构建和重启判断
+
+每次完成工作包或 Mission 后，执行者必须检查变更是否涉及以下内容：
+
+- `server/**/*.go`、`server/go.mod`、`server/go.sum`、数据库迁移、后端运行环境或 PM2 配置。
+- 前端依赖的 API 契约发生变化，需要后端新版本才能工作。
+
+命中任一条件时必须先运行 `go test ./...` 和 `go build -o wanxiang ./cmd/wanxiang`。只有测试和构建通过后，才能替换运行中的后端二进制。
+
+若本次工作只提交源码、尚未部署二进制，交接记录写明 `backend_restart_required: true`、`backend_restarted: false` 和未重启原因。若已经把新二进制部署到当前运行目录，则必须通过 PM2 重启 `wanxiang-agent`，随后检查 PM2 状态和 `/api/health`。没有关联 Go 后端时写明 `backend_restart_required: false` 和判断依据。
+
+### 17.4 Mission 交接字段
+
+每次完成后的交接记录必须包含：
+
+```yaml
+frontend_build_required: true
+frontend_build_command: npm test -- --run && npm run build
+frontend_build_result: passed
+frontend_dist_path: web/dist
+frontend_deployed: false
+backend_build_required: true
+backend_build_command: go test ./... && go build -o wanxiang ./cmd/wanxiang
+backend_build_result: passed
+backend_restart_required: true
+backend_restarted: false
+backend_restart_reason: 尚未替换生产运行目录中的二进制
+```
+
+执行者必须按实际情况填写字段，不能复制示例结果。

@@ -76,4 +76,4 @@
 - [x] Run frontend tests and build to catch API contract regressions.
 - [x] Record whether this Mission changes Web code or API contracts and whether `web/dist` must be rebuilt for deployment.
 - [x] Mark M02 complete with commits, tests, remaining risk, and M03 next action.
-- [ ] Merge to `main`, verify again, and push `origin/main`.
+- [x] Merge to `main`, verify again, and push `origin/main`.

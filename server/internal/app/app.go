@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"time"
 
 	"wanxiang-agent/server/internal/agents"
 	"wanxiang-agent/server/internal/config"
@@ -13,6 +14,7 @@ import (
 	"wanxiang-agent/server/internal/httpapi"
 	"wanxiang-agent/server/internal/issues"
 	"wanxiang-agent/server/internal/mr"
+	"wanxiang-agent/server/internal/planning"
 	"wanxiang-agent/server/internal/tasks"
 )
 
@@ -20,6 +22,7 @@ type App struct {
 	Config   config.Config
 	DB       *sql.DB
 	Launcher *agents.Launcher
+	Planning *planning.Worker
 	HTTP     httpapi.Dependencies
 }
 
@@ -45,15 +48,22 @@ func New(cfg config.Config) (*App, error) {
 	issueSvc := issues.NewService(conn, bus)
 	taskSvc := tasks.NewService(cfg, conn, bus)
 	mrSvc := mr.NewService(cfg, conn, bus, agentSvc, issueSvc)
+	planningSvc := planning.NewService(cfg, conn, agentSvc)
+	planningWorker := planning.NewWorker(conn, planningSvc, agentSvc, 2*time.Second)
+	planningWorker.Start()
 	return &App{
 		Config:   cfg,
 		DB:       conn,
 		Launcher: launcher,
+		Planning: planningWorker,
 		HTTP:     httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc},
 	}, nil
 }
 
 func (a *App) Close() error {
+	if a.Planning != nil {
+		a.Planning.Close()
+	}
 	if a.Launcher != nil {
 		a.Launcher.Close()
 	}

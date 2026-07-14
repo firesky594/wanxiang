@@ -11,8 +11,29 @@ import (
 	"testing"
 
 	"wanxiang-agent/server/internal/config"
+	"wanxiang-agent/server/internal/providers"
 	"wanxiang-agent/server/internal/testutil"
 )
+
+func TestChatAgentUsesPrivateRuntimeConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer private-key" {
+			t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"planned"}}],"usage":{"prompt_tokens":4,"completion_tokens":2}}`))
+	}))
+	defer server.Close()
+	cfg, _ := config.Load(t.TempDir())
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn)
+	if _, err := svc.SaveAgentConfig(t.Context(), AgentConfigInput{Name: "manager", ProviderType: "openai", BaseURL: server.URL, Model: "planner", APIKey: "private-key"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.ChatAgent(t.Context(), "manager", []providers.Message{{Role: "user", Content: "plan"}}, 500)
+	if err != nil || result.Content != "planned" || result.InputTokens != 4 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
 
 func TestSaveAgentConfigStoresSecretPrivatelyAndPreservesIt(t *testing.T) {
 	root := t.TempDir()

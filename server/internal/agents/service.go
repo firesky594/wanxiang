@@ -232,6 +232,18 @@ func (s *Service) ProbeAgent(ctx context.Context, name string) (AgentConfigView,
 	return view, err
 }
 
+func (s *Service) ChatAgent(ctx context.Context, name string, messages []providers.Message, maxTokens int) (providers.Result, error) {
+	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
+	if err != nil {
+		return providers.Result{}, err
+	}
+	provider, err := s.providerRegistry.Get(runtimeCfg.ProviderType)
+	if err != nil {
+		return providers.Result{}, err
+	}
+	return provider.Chat(ctx, providers.Config{APIKey: runtimeCfg.APIKey, BaseURL: runtimeCfg.BaseURL, Model: runtimeCfg.Model}, messages, maxTokens)
+}
+
 func (s *Service) loadRuntimeConfig(ctx context.Context, name string) (runtimeConfig, error) {
 	dir, err := s.agentBase(name)
 	if err != nil {

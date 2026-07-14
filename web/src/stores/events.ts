@@ -24,6 +24,13 @@ export const useEventsStore = defineStore('events', {
     source: null as EventSource | null
   }),
   actions: {
+    hydrate(items: RuntimeEvent[]) {
+      const merged = new Map(this.events.map((event) => [event.id, event]))
+      items.forEach((event) => {
+        if (event.type !== 'agent.heartbeat') merged.set(event.id, event)
+      })
+      this.events = [...merged.values()].sort((a, b) => a.id - b.id)
+    },
     connect() {
       if (this.source) {
         return
@@ -52,6 +59,7 @@ export const useEventsStore = defineStore('events', {
       }
       if (!this.events.some((item) => item.id === event.id)) {
         this.events.push(event)
+		this.events.sort((a, b) => a.id - b.id)
       }
     }
   }

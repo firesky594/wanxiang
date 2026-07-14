@@ -19,6 +19,7 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 		"projects", "tasks", "task_steps", "workflow_edges",
 		"merge_requests", "mr_reviews", "issues", "runtime_events",
 		"token_usage", "remote_sync_jobs", "audit_logs",
+		"agent_match_decisions", "task_assignments", "team_decisions",
 	} {
 		var name string
 		err := conn.QueryRow(`select name from sqlite_master where type='table' and name=?`, table).Scan(&name)

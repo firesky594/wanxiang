@@ -1,0 +1,14 @@
+[Unit]
+Description=Wanxiang Agent API
+After=network.target
+
+[Service]
+WorkingDirectory=/www/wwwroot/t.agents.com/wanxiang-agent
+Environment=WANXIANG_ROOT=/www/wwwroot/t.agents.com/wanxiang-agent
+Environment=WANXIANG_HTTP_ADDR=:8088
+ExecStart=/www/wwwroot/t.agents.com/wanxiang-agent/server/wanxiang
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

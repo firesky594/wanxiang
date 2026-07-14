@@ -1,0 +1,15 @@
+role: manager
+capabilities:
+  - planning
+  - review
+  - agent-governance
+required_env:
+  - MANAGER_API_KEY
+model_profiles:
+  planning:
+    provider_env: MANAGER_PROVIDER
+    api_key_env: MANAGER_API_KEY
+autonomy:
+  update_non_secret_agent_config: true
+git_policy:
+  commit_non_secret_changes: true

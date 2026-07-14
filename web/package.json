@@ -1,0 +1,22 @@
+{
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc -b && vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "2.3.1",
+    "@vue-flow/core": "1.47.0",
+    "element-plus": "2.11.0",
+    "pinia": "3.0.3",
+    "vue": "3.5.22",
+    "vue-router": "4.6.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.1",
+    "typescript": "5.9.3",
+    "vite": "7.1.7",
+    "vitest": "3.2.4",
+    "vue-tsc": "3.0.8"
+  }
+}

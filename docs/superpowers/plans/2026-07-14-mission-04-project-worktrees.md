@@ -34,7 +34,7 @@
 **Interfaces:**
 - Produces: `tasks.CreateTaskInput{Title, Description string; ProjectID *int64}`
 - Produces: `tasks.Service.CreateTaskWithInput(context.Context, CreateTaskInput, ...string) (Task, error)`
-- Produces: `project_workspaces` table with unique `step_id`, `branch_name`, and `worktree_path`.
+- Produces: `project_workspaces` table with unique `step_id`、`branch_name`、`worktree_path`，并分别记录代码 `base_commit` 与实际分支起点 `provision_commit`。
 
 - [x] 写失败测试：未传 `project_id` 创建新项目；传入已登记项目则复用；任意路径、脏仓库、非 `main` 和不存在项目均被拒绝且不产生任务。
 - [x] 写数据库失败测试，要求 `project_workspaces` 包含 assignment、分支、worktree、base commit、scope、hash、状态和错误字段及唯一约束。
@@ -77,7 +77,7 @@
 - Produces: `workspaces.Service.GetTask(context.Context, int64) (TaskWorkspace, error)`.
 - Produces: task status `workspace_ready`。
 
-- [ ] 写 Git 集成失败测试：两个 Agent 从同一 metadata commit 创建不同分支和不同 worktree，数据库记录为 `ready`。
+- [ ] 写 Git 集成失败测试：两个 Agent 共享代码 `base_commit`，从同一 `provision_commit` 创建不同分支和不同 worktree，数据库记录为 `ready`。
 - [ ] 写幂等与恢复失败测试：重复调用不重复提交或创建；`provisioning` 中断后校验现存资源并继续。
 - [ ] 写安全失败测试：同名未知分支、未知非空目录、脏 `main`、分支格式错误只记录 `failed`，不删除现场。
 - [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces -run Provision`，确认失败。

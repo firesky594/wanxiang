@@ -46,6 +46,14 @@ func TestAdminQueryRejectsBadPaginationAndTransition(t *testing.T) {
 	}
 }
 
+func TestAdminCreateTaskCanReuseRegisteredProject(t *testing.T) {
+	router, token, existing := queryFixture(t)
+	res := adminRequest(router, token, http.MethodPost, "/api/admin/tasks", `{"title":"reuse project","project_id":`+itoa(existing.ProjectID)+`}`)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"project_id":`+itoa(existing.ProjectID)) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestAdminQueryReturnsWorkflowCollections(t *testing.T) {
 	router, token, task := queryFixture(t)
 	for _, path := range []string{

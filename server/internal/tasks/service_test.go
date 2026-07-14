@@ -131,6 +131,76 @@ func TestCreateTaskInitializesProjectRepository(t *testing.T) {
 	}
 }
 
+func TestCreateTaskWithInputReusesRegisteredCleanMainProject(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn, events.NewBus(conn))
+	first, err := svc.CreateTask(context.Background(), "First", "new project")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := svc.CreateTaskWithInput(context.Background(), CreateTaskInput{Title: "Second", Description: "same project", ProjectID: &first.ProjectID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ProjectID != first.ProjectID || second.ProjectSlug != first.ProjectSlug {
+		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+	var projects, tasks int
+	_ = conn.QueryRow(`select count(*) from projects`).Scan(&projects)
+	_ = conn.QueryRow(`select count(*) from tasks`).Scan(&tasks)
+	if projects != 1 || tasks != 2 {
+		t.Fatalf("projects=%d tasks=%d", projects, tasks)
+	}
+}
+
+func TestCreateTaskWithInputRejectsUnsafeOrDirtyRegisteredProject(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn, events.NewBus(conn))
+	missing := int64(999)
+	if _, err := svc.CreateTaskWithInput(context.Background(), CreateTaskInput{Title: "missing", ProjectID: &missing}); !errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("missing err=%v", err)
+	}
+	result, err := conn.Exec(`insert into projects(slug,dir,status,remote_url,created_at) values('outside','/tmp/outside-project','created','','now')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside, _ := result.LastInsertId()
+	if _, err := svc.CreateTaskWithInput(context.Background(), CreateTaskInput{Title: "outside", ProjectID: &outside}); !errors.Is(err, ErrProjectConflict) {
+		t.Fatalf("outside err=%v", err)
+	}
+
+	first, err := svc.CreateTask(context.Background(), "First", "new project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDir := filepath.Join(cfg.ProjectDir, first.ProjectSlug)
+	if err := os.WriteFile(filepath.Join(projectDir, "dirty.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateTaskWithInput(context.Background(), CreateTaskInput{Title: "dirty", ProjectID: &first.ProjectID}); !errors.Is(err, ErrProjectConflict) {
+		t.Fatalf("dirty err=%v", err)
+	}
+	if err := os.Remove(filepath.Join(projectDir, "dirty.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := gitx.Run(context.Background(), projectDir, "checkout", "-b", "develop"); err != nil {
+		t.Fatalf("checkout: %v %s", err, output)
+	}
+	if _, err := svc.CreateTaskWithInput(context.Background(), CreateTaskInput{Title: "wrong branch", ProjectID: &first.ProjectID}); !errors.Is(err, ErrProjectConflict) {
+		t.Fatalf("branch err=%v", err)
+	}
+	var count int
+	_ = conn.QueryRow(`select count(*) from tasks`).Scan(&count)
+	if count != 1 {
+		t.Fatalf("tasks=%d", count)
+	}
+}
+
 func TestCreateTaskCleansUpWhenGitAddFails(t *testing.T) {
 	root := t.TempDir()
 	cfg, _ := config.Load(root)

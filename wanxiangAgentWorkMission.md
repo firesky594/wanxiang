@@ -206,7 +206,30 @@ next_action: 开始 M04，生成项目元数据、分支策略和独立 worktree
 
 ### M04：项目元数据、assignment、分支和 worktree
 
-**状态：未开始，依赖 M03**
+**状态：进行中，依赖 M03（已满足）**
+
+```yaml
+status: 进行中
+agent: Codex
+branch: feat/mission-04
+base_commit: cb231e8
+checkpoint_commit: null
+completed: []
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./...
+    result: baseline passed
+  - command: npm test
+    result: baseline 8 passed
+risks: []
+frontend_build_required: true
+frontend_build_result: pending
+backend_build_required: true
+backend_build_result: pending
+backend_restart_required: true
+backend_restarted: false
+backend_restart_reason: 尚未替换运行中的后端二进制
+next_action: 完成项目复用和 project_workspaces 数据状态
+```
 
 目标：建立可执行、可审计的项目范围和 Git 隔离环境。
 

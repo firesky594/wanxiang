@@ -36,12 +36,12 @@
 - Produces: `tasks.Service.CreateTaskWithInput(context.Context, CreateTaskInput, ...string) (Task, error)`
 - Produces: `project_workspaces` table with unique `step_id`, `branch_name`, and `worktree_path`.
 
-- [ ] 写失败测试：未传 `project_id` 创建新项目；传入已登记项目则复用；任意路径、脏仓库、非 `main` 和不存在项目均被拒绝且不产生任务。
-- [ ] 写数据库失败测试，要求 `project_workspaces` 包含 assignment、分支、worktree、base commit、scope、hash、状态和错误字段及唯一约束。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/tasks ./internal/db ./internal/httpapi`，确认新断言失败。
-- [ ] 实现 `CreateTaskWithInput`；保留 `CreateTask` 兼容包装；复用项目时只接受数据库 ID，并用 `files.UnderRoot`、真实路径和 Git 状态校验目录。
-- [ ] 修改管理员创建任务请求解析 `project_id`，错误映射为 400、404 或 409。
-- [ ] 把新项目初始化提交改为中文，运行定向测试确认通过。
+- [x] 写失败测试：未传 `project_id` 创建新项目；传入已登记项目则复用；任意路径、脏仓库、非 `main` 和不存在项目均被拒绝且不产生任务。
+- [x] 写数据库失败测试，要求 `project_workspaces` 包含 assignment、分支、worktree、base commit、scope、hash、状态和错误字段及唯一约束。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/tasks ./internal/db ./internal/httpapi`，确认新断言失败。
+- [x] 实现 `CreateTaskWithInput`；保留 `CreateTask` 兼容包装；复用项目时只接受数据库 ID，并用 `files.UnderRoot`、真实路径和 Git 状态校验目录。
+- [x] 修改管理员创建任务请求解析 `project_id`，错误映射为 400、404 或 409。
+- [x] 把新项目初始化提交改为中文，运行定向测试确认通过。
 - [ ] 提交：`功能：支持安全复用已登记项目`。
 
 ### Task 2: 规范化项目和 assignment 快照

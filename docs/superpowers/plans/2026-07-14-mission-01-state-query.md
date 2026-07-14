@@ -28,10 +28,10 @@
 **Interfaces:**
 - Produces: `List(ctx, limit, offset) ([]Task, error)`, `Get(ctx, id) (TaskDetail, error)`, `UpdateStatus(ctx, id, next, actor) (Task, error)`.
 
-- [ ] Add failing tests that create two tasks, list newest first, load one task with its project, return `ErrNotFound`, and reject `created -> completed`.
-- [ ] Run `GOCACHE=/tmp/wanxiang-m01-go-cache go test ./internal/tasks -run 'Test(List|Get|Update)'` and confirm the new tests fail because the methods do not exist.
-- [ ] Add `Project`, `TaskStep`, `WorkflowEdge`, `TaskDetail`, `ErrNotFound`, and `ErrInvalidTransition`; implement the three methods with explicit allowed transitions.
-- [ ] Re-run the focused tests and confirm they pass.
+- [x] Add failing tests that create two tasks, list newest first, load one task with its project, return `ErrNotFound`, and reject `created -> completed`.
+- [x] Run `GOCACHE=/tmp/wanxiang-m01-go-cache go test ./internal/tasks -run 'Test(List|Get|Update)'` and confirm the new tests fail because the methods do not exist.
+- [x] Add `Project`, `TaskStep`, `WorkflowEdge`, `TaskDetail`, `ErrNotFound`, and `ErrInvalidTransition`; implement the three methods with explicit allowed transitions.
+- [x] Re-run the focused tests and confirm they pass.
 
 ### Task 2: MR, Issue, and event history queries
 
@@ -46,10 +46,10 @@
 **Interfaces:**
 - Produces: `mr.Service.List`, `issues.Service.List`, and `events.Bus.List` with task filters and pagination.
 
-- [ ] Write failing tests that verify newest-first pagination and task filtering.
-- [ ] Run the three focused package test commands and confirm missing-method failures.
-- [ ] Implement SQL list methods with bounded pagination and deterministic `id desc` ordering.
-- [ ] Re-run focused tests and confirm they pass.
+- [x] Write failing tests that verify newest-first pagination and task filtering.
+- [x] Run the three focused package test commands and confirm missing-method failures.
+- [x] Implement SQL list methods with bounded pagination and deterministic `id desc` ordering.
+- [x] Re-run focused tests and confirm they pass.
 
 ### Task 3: Admin query HTTP API
 
@@ -61,10 +61,10 @@
 **Interfaces:**
 - Produces: `GET /api/admin/tasks`, `GET /api/admin/tasks/{id}`, `PATCH /api/admin/tasks/{id}/status`, `GET /api/admin/mrs`, `GET /api/admin/issues`, and `GET /api/admin/tasks/{id}/events`.
 
-- [ ] Add failing HTTP tests for authentication, persisted task detail, 404, 409, pagination validation, and event history.
-- [ ] Run `GOCACHE=/tmp/wanxiang-m01-go-cache go test ./internal/httpapi -run TestAdminQuery` and confirm 404 or method-not-defined failures.
-- [ ] Implement handlers that map domain errors to 404/409 and malformed pagination to 400.
-- [ ] Re-run the focused tests and confirm they pass.
+- [x] Add failing HTTP tests for authentication, persisted task detail, 404, 409, pagination validation, and event history.
+- [x] Run `GOCACHE=/tmp/wanxiang-m01-go-cache go test ./internal/httpapi -run TestAdminQuery` and confirm 404 or method-not-defined failures.
+- [x] Implement handlers that map domain errors to 404/409 and malformed pagination to 400.
+- [x] Re-run the focused tests and confirm they pass.
 
 ### Task 4: Persisted frontend task store
 
@@ -80,18 +80,18 @@
 **Interfaces:**
 - Produces: `useTasksStore().loadList()` and `loadDetail(id)`, plus `useEventsStore().hydrate(events)`.
 
-- [ ] Write failing Vitest cases for persisted list/detail loading and event snapshot deduplication.
-- [ ] Run `npm test -- --run src/stores/tasks.test.ts src/stores/events.test.ts` and confirm failures caused by missing stores/actions.
-- [ ] Implement API types, stores, initial loading, error state, and snapshot-before-SSE ordering.
-- [ ] Re-run focused frontend tests and confirm they pass.
+- [x] Write failing Vitest cases for persisted list/detail loading and event snapshot deduplication.
+- [x] Run `npm test -- --run src/stores/tasks.test.ts src/stores/events.test.ts` and confirm failures caused by missing stores/actions.
+- [x] Implement API types, stores, initial loading, error state, and snapshot-before-SSE ordering.
+- [x] Re-run focused frontend tests and confirm they pass.
 
 ### Task 5: Mission evidence and full verification
 
 **Files:**
 - Modify: `wanxiangAgentWorkMission.md`
 
-- [ ] Run `gofmt` on changed Go files.
-- [ ] Run `GOCACHE=/tmp/wanxiang-m01-go-cache go test ./...` and confirm zero failures.
-- [ ] Run `npm test -- --run && npm run build` and confirm tests and build pass.
-- [ ] Update M01 and the handoff block with commit, tests, risks, and `next_action` for M02.
+- [x] Run `gofmt` on changed Go files.
+- [x] Run `GOCACHE=/tmp/wanxiang-m01-go-cache go test ./...` and confirm zero failures.
+- [x] Run `npm test -- --run && npm run build` and confirm tests and build pass.
+- [x] Update M01 and the handoff block with commit, tests, risks, and `next_action` for M02.
 - [ ] Commit the Mission implementation, merge it into `main`, re-run verification on `main`, and push `origin/main`.

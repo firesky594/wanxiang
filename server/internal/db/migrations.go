@@ -36,6 +36,11 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`create index if not exists idx_task_checkpoints_step_created on task_checkpoints(step_id, created_at)`,
 		`create table if not exists step_reassignments (id integer primary key, task_id integer not null, step_id integer not null, from_agent text not null, to_agent text not null, from_lease_id text not null, to_lease_id text not null default '', checkpoint_id integer, attempt integer not null, reason text not null, status text not null, from_branch text not null default '', from_worktree text not null default '', to_branch text not null default '', to_worktree text not null default '', created_by text not null, created_at text not null, completed_at text)`,
 		`create index if not exists idx_step_reassignments_step on step_reassignments(step_id, created_at)`,
+		`create table if not exists executor_runs (id integer primary key, task_id integer not null, step_id integer not null, agent_name text not null, lease_id text not null unique, lease_version integer not null, pid integer, status text not null, request_count integer not null default 0, input_tokens integer not null default 0, output_tokens integer not null default 0, exit_code integer, last_heartbeat_at text, error_summary text not null default '', created_at text not null, started_at text, exited_at text, updated_at text not null)`,
+		`create index if not exists idx_executor_runs_step_status on executor_runs(step_id, status)`,
+		`create index if not exists idx_executor_runs_agent_status on executor_runs(agent_name, status)`,
+		`create table if not exists executor_actions (id integer primary key, run_id integer not null, sequence integer not null, action_type text not null, relative_path text not null default '', status text not null, result_summary text not null default '', result_hash text not null default '', created_at text not null, unique(run_id, sequence))`,
+		`create index if not exists idx_executor_actions_run on executor_actions(run_id, sequence)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {

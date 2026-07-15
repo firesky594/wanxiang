@@ -374,24 +374,32 @@ completed:
   - 已确认使用 Go 多 Worker 子进程，每个 Agent 只用自身 env 调用远程 Provider API
   - 已禁止本机 Codex、OpenCode、任意 AI CLI 和模型直连 shell
   - 已建立 m06-smoke 低量测试 Agent，并在不覆盖源文件的前提下复制 manager env，权限均为 0600
+  - Task 1 已实现不覆盖、拒绝符号链接且固定 0600 的测试 env 引导
+  - Task 1 已增加 executor_runs、executor_actions、唯一约束和无秘密执行协议类型
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./internal/db -run 'CopyTestEnv|ExecutorMigration|ExecutorTypes'
+    result: passed
+  - command: cmp manager env 与 m06-smoke env，并检查目标权限
+    result: passed，内容一致且目标均为 0600；未输出 env 内容
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task1-bin ./cmd/wanxiang
+    result: passed
 risks:
-  - 当前只有设计与测试配置，执行器代码尚未实现
+  - 当前只完成执行记录和测试配置引导，受控工具与 Worker 尚未实现
 frontend_build_required: false
 frontend_build_result: not_required
 frontend_build_reason: 当前只新增后端设计和被 Git 忽略的测试 Agent 配置
-backend_build_required: false
-backend_build_result: not_required
-backend_restart_required: false
+backend_build_required: true
+backend_build_result: passed
+backend_restart_required: true
 backend_restarted: false
-backend_restart_reason: 当前未修改后端代码或生产运行文件
+backend_restart_reason: 当前只修改功能分支源码，尚未构建并替换 PM2 指向的生产二进制
 backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 实施 M06 Task 1 的安全 env 引导和执行记录数据结构
+next_action: 实施 M06 Task 2 的受控文件工具和全链路脱密
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。

@@ -32,11 +32,11 @@
 - Produces: `CopyTestEnv(source, target string) error`，仅复制不存在的目标并固定 `0600`。
 - Produces: `executor_runs`、`executor_actions`，以及 `RunStatus`、`ActionRequest`、`WorkerInput`。
 
-- [ ] 写失败测试：复制 manager env 到目标 Agent，内容一致、权限 `0600`、已有目标拒绝覆盖、错误信息不包含源内容。
-- [ ] 写失败迁移测试：两张执行表、索引和幂等迁移存在，字段不保存完整 Provider 请求/响应或密钥。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./internal/db -run 'CopyTestEnv|ExecutorMigration'` 确认失败。
-- [ ] 实现安全复制、执行类型、迁移和索引。
-- [ ] 重跑定向测试确认通过。
+- [x] 写失败测试：复制 manager env 到目标 Agent，内容一致、权限 `0600`、已有目标拒绝覆盖、错误信息不包含源内容。
+- [x] 写失败迁移测试：两张执行表、索引和幂等迁移存在，字段不保存完整 Provider 请求/响应或密钥。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./internal/db -run 'CopyTestEnv|ExecutorMigration'` 确认失败。
+- [x] 实现安全复制、执行类型、迁移和索引。
+- [x] 重跑定向测试确认通过。
 - [ ] 提交：`数据库：增加 Agent 执行记录与测试配置引导`。
 
 ### Task 2：受控文件工具与 Lease Guard

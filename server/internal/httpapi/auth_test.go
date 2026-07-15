@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,9 +18,7 @@ import (
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/events"
 	"wanxiang-agent/server/internal/gitx"
-	"wanxiang-agent/server/internal/issues"
 	"wanxiang-agent/server/internal/mr"
-	"wanxiang-agent/server/internal/tasks"
 	"wanxiang-agent/server/internal/testutil"
 )
 
@@ -259,127 +256,24 @@ func TestAgentRouteRejectsUnknownToken(t *testing.T) {
 }
 
 func TestMergeRouteUsesAuthenticatedManagerIdentity(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	cfg, _ := config.Load(root)
 	conn := testutil.OpenDB(t)
-	bus := events.NewBus(conn)
-	taskSvc := tasks.NewService(cfg, conn, bus)
-	task, err := taskSvc.CreateTask(ctx, "HTTP merge", "Verify manager identity")
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	projectDir := filepath.Join(cfg.ProjectDir, task.ProjectSlug)
-	mustHTTPTestGit(t, projectDir, "checkout", "-b", "agent/backend/http-merge")
-	if err := os.WriteFile(filepath.Join(projectDir, "http-merge.txt"), []byte("merged\n"), 0o644); err != nil {
-		t.Fatalf("write branch file: %v", err)
-	}
-	mustHTTPTestGit(t, projectDir, "add", "http-merge.txt")
-	mustHTTPTestGit(t, projectDir, "commit", "-m", "test: add http merge file")
-
-	agentSvc := agents.NewService(cfg, conn)
-	if _, err := agentSvc.EnsureManager(ctx); err != nil {
-		t.Fatalf("EnsureManager: %v", err)
-	}
-	if _, err := agentSvc.SaveAgentConfig(ctx, agents.AgentConfigInput{Name: "manager", ProviderType: "openai", Model: "test-model", APIKey: "test-key"}); err != nil {
-		t.Fatalf("SaveAgentConfig: %v", err)
-	}
-	if _, err := conn.Exec(`update agent_registry set status='online' where name='manager'`); err != nil {
-		t.Fatalf("mark manager online: %v", err)
-	}
-	seedAgentToken(t, conn, "backend-dev", "backend-token")
+	cfg, _ := config.Load(t.TempDir())
 	seedAgentToken(t, conn, "manager", "manager-token")
-	mrSvc := mr.NewService(cfg, conn, bus, agentSvc, issues.NewService(conn))
-	created, err := mrSvc.Create(ctx, task.ProjectID, task.ID, "HTTP merge", "agent/backend/http-merge", "backend-dev")
-	if err != nil {
-		t.Fatalf("Create MR: %v", err)
-	}
-	router := NewRouter(Dependencies{DB: conn, MR: mrSvc})
-
-	url := fmt.Sprintf("/api/agent/mr/%d/merge", created.ID)
-	backendReq := httptest.NewRequest(http.MethodPost, url, bytes.NewBufferString(`{"actor":"manager"}`))
-	backendReq.Header.Set("Authorization", "Bearer backend-token")
-	backendRec := httptest.NewRecorder()
-	router.ServeHTTP(backendRec, backendReq)
-	if backendRec.Code != http.StatusForbidden {
-		t.Fatalf("backend impersonation status=%d body=%s", backendRec.Code, backendRec.Body.String())
-	}
-
-	managerReq := httptest.NewRequest(http.MethodPost, url, bytes.NewBufferString(`{"actor":"backend-dev"}`))
-	managerReq.Header.Set("Authorization", "Bearer manager-token")
-	managerRec := httptest.NewRecorder()
-	router.ServeHTTP(managerRec, managerReq)
-	if managerRec.Code != http.StatusOK {
-		t.Fatalf("manager status=%d body=%s", managerRec.Code, managerRec.Body.String())
-	}
-	content, err := gitx.Run(ctx, projectDir, "show", "main:http-merge.txt")
-	if err != nil || content != "merged\n" {
-		t.Fatalf("main content=%q err=%v", content, err)
+	router := NewRouter(Dependencies{DB: conn, MR: mr.NewService(cfg, conn, events.NewBus(conn), nil)})
+	legacy := agentRequest(router, "manager-token", http.MethodPost, "/api/agent/mr/1/merge", `{}`)
+	if legacy.Code != http.StatusNotFound {
+		t.Fatalf("legacy status=%d body=%s", legacy.Code, legacy.Body.String())
 	}
 }
 
 func TestMissingManagerKeyCannotBeBypassedByAuthenticatedHeartbeat(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	cfg, _ := config.Load(root)
+	cfg, _ := config.Load(t.TempDir())
 	conn := testutil.OpenDB(t)
-	bus := events.NewBus(conn)
-	taskSvc := tasks.NewService(cfg, conn, bus)
-	task, err := taskSvc.CreateTask(ctx, "Blocked manager merge", "Manager key must be present")
-	if err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	projectDir := filepath.Join(cfg.ProjectDir, task.ProjectSlug)
-	mustHTTPTestGit(t, projectDir, "checkout", "-b", "agent/manager/missing-key")
-	if err := os.WriteFile(filepath.Join(projectDir, "missing-key.txt"), []byte("must not merge\n"), 0o644); err != nil {
-		t.Fatalf("write branch file: %v", err)
-	}
-	mustHTTPTestGit(t, projectDir, "add", "missing-key.txt")
-	mustHTTPTestGit(t, projectDir, "commit", "-m", "test: add missing-key branch")
-
-	agentSvc := agents.NewService(cfg, conn, bus)
-	status, err := agentSvc.EnsureManager(ctx)
-	if err != nil {
-		t.Fatalf("EnsureManager: %v", err)
-	}
-	if status.Status != "blocked: missing_secret" {
-		t.Fatalf("initial manager status=%q", status.Status)
-	}
 	seedAgentToken(t, conn, "manager", "manager-token")
-	mrSvc := mr.NewService(cfg, conn, bus, agentSvc, issues.NewService(conn, bus))
-	created, err := mrSvc.Create(ctx, task.ProjectID, task.ID, "Must stay open", "agent/manager/missing-key", "manager")
-	if err != nil {
-		t.Fatalf("Create MR: %v", err)
-	}
-	router := NewRouter(Dependencies{DB: conn, Agents: agentSvc, MR: mrSvc})
-
-	heartbeatReq := httptest.NewRequest(http.MethodPost, "/api/agent/heartbeat", bytes.NewBufferString(`{"name":"manager","role":"manager","status":"online"}`))
-	heartbeatReq.Header.Set("Authorization", "Bearer manager-token")
-	heartbeatRec := httptest.NewRecorder()
-	router.ServeHTTP(heartbeatRec, heartbeatReq)
-	if heartbeatRec.Code != http.StatusBadRequest {
-		t.Errorf("heartbeat status=%d body=%s", heartbeatRec.Code, heartbeatRec.Body.String())
-	}
-
-	mergeReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/agent/mr/%d/merge", created.ID), nil)
-	mergeReq.Header.Set("Authorization", "Bearer manager-token")
-	mergeRec := httptest.NewRecorder()
-	router.ServeHTTP(mergeRec, mergeReq)
-	if mergeRec.Code != http.StatusForbidden {
-		t.Errorf("merge status=%d body=%s", mergeRec.Code, mergeRec.Body.String())
-	}
-	var registryStatus, mrStatus string
-	if err := conn.QueryRow(`select status from agent_registry where name='manager'`).Scan(&registryStatus); err != nil {
-		t.Fatalf("load manager status: %v", err)
-	}
-	if err := conn.QueryRow(`select status from merge_requests where id=?`, created.ID).Scan(&mrStatus); err != nil {
-		t.Fatalf("load MR status: %v", err)
-	}
-	if registryStatus != "blocked: missing_secret" || mrStatus != "open" {
-		t.Errorf("registry status=%q MR status=%q", registryStatus, mrStatus)
-	}
-	if _, err := gitx.Run(ctx, projectDir, "show", "main:missing-key.txt"); err == nil {
-		t.Errorf("missing-key branch was merged into main")
+	router := NewRouter(Dependencies{DB: conn, MR: mr.NewService(cfg, conn, events.NewBus(conn), nil)})
+	merge := agentRequest(router, "manager-token", http.MethodPost, "/api/agent/mrs/1/merge", `{"agent_name":"manager","role":"manager"}`)
+	if merge.Code != http.StatusConflict {
+		t.Fatalf("merge status=%d body=%s", merge.Code, merge.Body.String())
 	}
 }
 

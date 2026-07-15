@@ -90,6 +90,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		if deps.MR != nil {
 			admin.Get("/api/admin/mrs", handleListMRs(deps.MR))
 			admin.Get("/api/admin/mrs/{id}", handleGetMR(deps.MR))
+			admin.Get("/api/admin/manager-notifications", handleListManagerNotifications(deps.MR))
 		}
 	})
 	r.Group(func(agent chi.Router) {
@@ -101,8 +102,10 @@ func NewRouter(deps Dependencies) http.Handler {
 			agent.Post("/api/agent/logs/write", handleAgentLogWrite(deps.Agents))
 		}
 		if deps.MR != nil {
-			agent.Post("/api/agent/mr/create", handleCreateMR(deps.MR))
-			agent.Post("/api/agent/mr/{id}/merge", handleManagerMerge(deps.MR))
+			agent.Post("/api/agent/completion-reports", handleSubmitCompletionReport(deps.MR))
+			agent.Get("/api/agent/mrs/{id}", handleGetAgentMR(deps.MR))
+			agent.Post("/api/agent/mrs/{id}/reviews", handleReviewMR(deps.MR))
+			agent.Post("/api/agent/mrs/{id}/merge", handleMergeMR(deps.MR))
 		}
 		if deps.Leases != nil {
 			agent.Post("/api/agent/tasks/{taskID}/steps/{stepID}/lease/acquire", handleAcquireLease(deps.Leases))

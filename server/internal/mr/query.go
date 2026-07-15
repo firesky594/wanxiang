@@ -38,6 +38,29 @@ func (s *Service) AdminDetail(ctx context.Context, mrID int64) (MRDetail, error)
 	return detail, err
 }
 
+func (s *Service) ListNotifications(ctx context.Context, limit, offset int) ([]ManagerNotification, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.QueryContext(ctx, `select id,project_id,task_id,mr_id,report_id,project_lead,main_commit,status from manager_notifications order by id desc limit ? offset ?`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]ManagerNotification, 0)
+	for rows.Next() {
+		var item ManagerNotification
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.TaskID, &item.MRID, &item.ReportID, &item.ProjectLead, &item.MainCommit, &item.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Service) loadDetail(ctx context.Context, mrID int64) (MRDetail, string, error) {
 	var detail MRDetail
 	var createdBy string

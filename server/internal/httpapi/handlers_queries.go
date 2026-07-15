@@ -131,6 +131,21 @@ func handleGetMR(svc *mr.Service) http.HandlerFunc {
 	}
 }
 
+func handleListManagerNotifications(svc *mr.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limit, offset, ok := pagination(w, r)
+		if !ok {
+			return
+		}
+		items, err := svc.ListNotifications(r.Context(), limit, offset)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorCode("notification_query_failed"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "notifications": items})
+	}
+}
+
 func handleListIssues(svc *issues.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit, offset, ok := pagination(w, r)

@@ -539,7 +539,7 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ```yaml
 mission: M08
-phase: backend_api_complete
+phase: integration_verification
 branch: feat/mission-08
 checkpoint_commit: 0114759
 completed:
@@ -551,13 +551,18 @@ completed:
   - 已实现计划版本、不可变交付快照、验收决定、返工轮次和通知恢复 Worker
   - 已实现 manager Provider 返工规划恢复、管理员交付 API 和应用生命周期
   - 已实现高风险事项自动转独立阻塞 Issue，验收不附带授权
+  - 已实现 /deliveries 交付证据、决定历史和返工版本页面
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/db
     result: passed
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/planning ./internal/httpapi ./internal/app
     result: passed
+  - command: npm test -- --run
+    result: 6 files, 15 tests passed
+  - command: npm run build
+    result: passed, chunk-size warning retained
 blockers: []
-next_action: 实现 /deliveries Web 页面、交互测试和生产构建
+next_action: 执行 Go 与 Web 全量验证、密钥扫描和代码审查，修复问题后合并 main
 ```
 
 ### M09：测试、重试、回滚和发布编排

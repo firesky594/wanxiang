@@ -220,6 +220,9 @@ func TestAgentRouteUsesAuthenticatedAgentIdentity(t *testing.T) {
 	cfg, _ := config.Load(root)
 	conn := testutil.OpenDB(t)
 	seedAgentToken(t, conn, "worker-1", "agent-secret")
+	if _, err := conn.Exec(`update agent_registry set dir=? where name='worker-1'`, filepath.Join(cfg.AgentDir, "worker-1")); err != nil {
+		t.Fatal(err)
+	}
 	svc := agents.NewService(cfg, conn)
 	router := NewRouter(Dependencies{DB: conn, Agents: svc})
 
@@ -380,6 +383,38 @@ func TestMissingManagerKeyCannotBeBypassedByAuthenticatedHeartbeat(t *testing.T)
 	}
 }
 
+func TestAgentPrincipalUsesRegistryRoleAndIgnoresForgedHeaders(t *testing.T) {
+	conn := testutil.OpenDB(t)
+	if _, err := conn.Exec(`insert into agent_registry(name,role,dir,status) values('lead','project_lead','agents/lead','ready')`); err != nil {
+		t.Fatal(err)
+	}
+	token := "principal-token"
+	if _, err := conn.Exec(`insert into agent_tokens(agent_name,token_hash,scopes,created_at) values('lead',?,'agent','now')`, auth.HashSecret(token)); err != nil {
+		t.Fatal(err)
+	}
+	var got AgentPrincipalValue
+	handler := RequireAgent(conn)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+		got, ok = AgentPrincipal(r.Context())
+		if !ok {
+			t.Fatal("principal missing")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Agent-Name", "manager")
+	req.Header.Set("X-Agent-Role", "manager")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	if got.Name != "lead" || got.Role != "project_lead" {
+		t.Fatalf("principal=%+v", got)
+	}
+}
+
 func seedAdmin(t *testing.T, conn *sql.DB, username string, password string) {
 	t.Helper()
 	hash, err := auth.HashPassword(password)
@@ -394,6 +429,13 @@ func seedAdmin(t *testing.T, conn *sql.DB, username string, password string) {
 
 func seedAgentToken(t *testing.T, conn *sql.DB, agentName, token string) {
 	t.Helper()
+	role := "worker"
+	if agentName == "manager" {
+		role = "manager"
+	}
+	if _, err := conn.Exec(`insert into agent_registry(name,role,dir,status) values(?,?,?,'ready') on conflict(name) do nothing`, agentName, role, "agents/"+agentName); err != nil {
+		t.Fatalf("seedAgentRegistry: %v", err)
+	}
 	_, err := conn.Exec(`insert into agent_tokens(agent_name,token_hash,scopes,expires_at,created_at) values(?,?,?,?,?)`,
 		agentName, auth.HashSecret(token), "runtime", time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {

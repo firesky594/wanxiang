@@ -20,6 +20,11 @@ const (
 	agentIdentityKey identityKey = "agent_identity"
 )
 
+type AgentPrincipalValue struct {
+	Name string
+	Role string
+}
+
 func RequireAdmin(db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,12 +48,12 @@ func RequireAdmin(db *sql.DB) func(http.Handler) http.Handler {
 func RequireAgent(db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			agentName, ok := validAgentToken(r.Context(), db, bearerToken(r))
+			principal, ok := validAgentToken(r.Context(), db, bearerToken(r))
 			if !ok {
 				writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid or expired agent token"})
 				return
 			}
-			ctx := context.WithValue(r.Context(), agentIdentityKey, agentName)
+			ctx := context.WithValue(r.Context(), agentIdentityKey, principal)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -60,8 +65,13 @@ func AdminIdentity(ctx context.Context) (string, bool) {
 }
 
 func AgentIdentity(ctx context.Context) (string, bool) {
-	agentName, ok := ctx.Value(agentIdentityKey).(string)
-	return agentName, ok && agentName != ""
+	principal, ok := AgentPrincipal(ctx)
+	return principal.Name, ok
+}
+
+func AgentPrincipal(ctx context.Context) (AgentPrincipalValue, bool) {
+	principal, ok := ctx.Value(agentIdentityKey).(AgentPrincipalValue)
+	return principal, ok && principal.Name != "" && principal.Role != ""
 }
 
 func bearerToken(r *http.Request) string {
@@ -84,17 +94,17 @@ func validAdminSession(ctx context.Context, db *sql.DB, token string) (string, b
 	return username, expiryValid(expiresAt)
 }
 
-func validAgentToken(ctx context.Context, db *sql.DB, token string) (string, bool) {
+func validAgentToken(ctx context.Context, db *sql.DB, token string) (AgentPrincipalValue, bool) {
 	if token == "" || db == nil {
-		return "", false
+		return AgentPrincipalValue{}, false
 	}
-	var agentName string
+	var principal AgentPrincipalValue
 	var expiresAt sql.NullString
-	err := db.QueryRowContext(ctx, `select agent_name,expires_at from agent_tokens where token_hash=? order by id desc limit 1`, auth.HashSecret(token)).Scan(&agentName, &expiresAt)
-	if err != nil || agents.ValidateName(agentName) != nil {
-		return "", false
+	err := db.QueryRowContext(ctx, `select t.agent_name,r.role,t.expires_at from agent_tokens t join agent_registry r on r.name=t.agent_name where t.token_hash=? order by t.id desc limit 1`, auth.HashSecret(token)).Scan(&principal.Name, &principal.Role, &expiresAt)
+	if err != nil || agents.ValidateName(principal.Name) != nil || strings.TrimSpace(principal.Role) == "" {
+		return AgentPrincipalValue{}, false
 	}
-	return agentName, !expiresAt.Valid || expiresAt.String == "" || expiryValid(expiresAt.String)
+	return principal, !expiresAt.Valid || expiresAt.String == "" || expiryValid(expiresAt.String)
 }
 
 func expiryValid(value string) bool {

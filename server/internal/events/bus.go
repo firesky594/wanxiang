@@ -28,15 +28,23 @@ func NewBus(db *sql.DB) *Bus {
 }
 
 func (b *Bus) Publish(ctx context.Context, event Event) error {
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now().UTC()
-	}
-	res, err := b.db.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,?,?,?,?)`,
-		event.TaskID, event.Type, event.Actor, string(event.Payload), event.CreatedAt.Format(time.RFC3339Nano))
+	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	event.ID, _ = res.LastInsertId()
+	defer tx.Rollback()
+	event, err = InsertTx(ctx, tx, event)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	b.Notify(event)
+	return nil
+}
+
+func (b *Bus) Notify(event Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for ch := range b.subs {
@@ -45,7 +53,6 @@ func (b *Bus) Publish(ctx context.Context, event Event) error {
 		default:
 		}
 	}
-	return nil
 }
 
 func (b *Bus) PublishJSON(ctx context.Context, taskID *int64, eventType, actor string, payload any) error {

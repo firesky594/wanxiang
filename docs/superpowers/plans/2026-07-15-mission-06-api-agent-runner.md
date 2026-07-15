@@ -113,7 +113,7 @@
 - [x] 写失败测试：15 秒心跳、租约冲突退出、关闭信号触发 checkpoint，异常退出不伪造完成。
 - [x] 实现 fd 输入、Worker 主函数、信号处理和退出协议。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./cmd/wanxiang -run Worker`。
-- [ ] 提交：`功能：增加 API Agent 独立 Worker 进程`。
+- [x] 提交：`功能：增加 API Agent 独立 Worker 进程`（`372fd7f`）。
 
 ### Task 6：Supervisor 调度与 App 生命周期
 

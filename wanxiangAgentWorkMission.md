@@ -478,7 +478,7 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ### M07：完成报告、MR 和审核链路
 
-**状态：代码与全量测试完成，等待合并和生产部署**
+**状态：已完成并部署生产**
 
 目标：让执行 Agent 提交结构化完成报告，并按项目负责人决策进入审核和合并。
 
@@ -508,10 +508,12 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 - Go 全量测试：`GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=120s ./...`，通过。
 - Web 全量测试：5 个测试文件、13 个用例通过。
 - Web 生产构建：`vue-tsc -b` 与 Vite build 通过；保留现有 chunk-size warning。
-- 后端候选二进制：`/tmp/wanxiang-m07`，SHA-256 `6dbfc2c29dc75cab00b592d131cb5a2ae97f534b69cd84f4ab2fe061b47ded4b`。
+- 生产二进制：`server/wanxiang`，SHA-256 `f657525e219348865d7d3022420bc0ba1f0bd65f86a22db5de67b136dcf85a24`；旧版备份为 `/tmp/wanxiang-before-m07-bin`。
 - 变更差异密钥扫描命中 0。
-- `frontend_build_required: true`，`frontend_deployed: false`。
-- `backend_build_required: true`，`backend_restart_required: true`，`backend_restarted: false`。
+- `frontend_build_required: true`，`frontend_deployed: true`；生产目录 `web/dist` 已生成 `index-BOSPQwTk.js` 与 `index-ChmwfEd7.css`。
+- `backend_build_required: true`，`backend_restart_required: true`，`backend_restarted: true`；PM2 `wanxiang-agent` 状态 `online`，重启计数 3。
+- 合并提交：`8e4700d 合并：完成 M07 报告审核与 Web 链路`。
+- 生产验证：`GET /api/health` 返回 200 `{"ok":true}`；未认证访问 `GET /api/admin/manager-notifications` 返回预期 401。
 - 提交链：`d12dbcc`、`5ee0dee`、`ff0c2b1`、`abea864`、`e23e2bc`、`9bd2d87`、`8011e22`。
 
 ### M08：总管汇总、用户验收和返工

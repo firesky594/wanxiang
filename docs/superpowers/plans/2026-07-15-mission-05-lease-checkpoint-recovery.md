@@ -102,7 +102,7 @@
 - [x] 写恢复失败测试：超过 deadline、出现新 version、Git 漂移或 worktree 现场不一致时保持 interrupted。
 - [x] 实现扫描、幂等事件、Git 现场校验和原租约恢复。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Interrupt|Resume|Worker'`。
-- [ ] 提交：`功能：扫描中断任务并恢复原租约`。
+- [x] 提交：`功能：扫描中断任务并恢复原租约`（`19ff573`）。
 
 ### Task 5：冻结、延期和安全接管
 

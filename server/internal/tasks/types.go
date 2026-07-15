@@ -5,7 +5,15 @@ import "errors"
 var (
 	ErrNotFound          = errors.New("task not found")
 	ErrInvalidTransition = errors.New("invalid task status transition")
+	ErrProjectNotFound   = errors.New("project not found")
+	ErrProjectConflict   = errors.New("project is not reusable")
 )
+
+type CreateTaskInput struct {
+	Title       string
+	Description string
+	ProjectID   *int64
+}
 
 type Task struct {
 	ID          int64  `json:"id"`

@@ -109,6 +109,48 @@ export interface TaskDetail {
   edges: WorkflowEdge[]
 }
 
+export async function createAdminTask(title: string, description: string, projectID?: number): Promise<Task> {
+  const body: { title: string; description: string; project_id?: number } = { title, description }
+  if (projectID !== undefined) body.project_id = projectID
+  const response = await api<{ ok: boolean; task: Task }>('/api/admin/tasks', { method: 'POST', body: JSON.stringify(body) })
+  return response.task
+}
+
+export interface WorkspaceItem {
+  id: number
+  step_id: number
+  assignment_id: number
+  agent_name: string
+  reports_to?: string
+  branch_name: string
+  worktree_path: string
+  base_commit: string
+  provision_commit: string
+  write_scope: string[]
+  metadata_hash: string
+  status: string
+  last_error?: string
+}
+
+export interface TaskWorkspace {
+  task_id: number
+  project_id: number
+  project_slug: string
+  status: string
+  items: WorkspaceItem[]
+}
+
+async function workspaceAction(taskID: number, action: string, body?: unknown): Promise<TaskWorkspace> {
+  const response = await api<{ ok: boolean; workspace: TaskWorkspace }>(`/api/admin/tasks/${taskID}/workspace/${action}`, {
+    method: 'POST', body: body === undefined ? undefined : JSON.stringify(body)
+  })
+  return response.workspace
+}
+export async function getTaskWorkspace(taskID: number): Promise<TaskWorkspace> { const response = await api<{ok:boolean;workspace:TaskWorkspace}>(`/api/admin/tasks/${taskID}/workspace`); return response.workspace }
+export function reconcileTaskWorkspace(taskID: number) { return workspaceAction(taskID, 'reconcile') }
+export function repairTaskWorkspace(taskID: number, direction: 'database'|'git_snapshot') { return workspaceAction(taskID, 'repair', { direction }) }
+export function cleanupTaskWorkspace(taskID: number, action: 'request'|'confirm', confirmed = false) { return workspaceAction(taskID, 'cleanup', { action, confirmed }) }
+
 export interface MatchRejection {
   name: string
   reasons: string[]

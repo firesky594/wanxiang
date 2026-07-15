@@ -15,6 +15,7 @@ import (
 	"wanxiang-agent/server/internal/mr"
 	"wanxiang-agent/server/internal/tasks"
 	"wanxiang-agent/server/internal/testutil"
+	"wanxiang-agent/server/internal/workspaces"
 )
 
 func TestAdminQueryTasksAndDetail(t *testing.T) {
@@ -46,12 +47,29 @@ func TestAdminQueryRejectsBadPaginationAndTransition(t *testing.T) {
 	}
 }
 
+func TestAdminCreateTaskCanReuseRegisteredProject(t *testing.T) {
+	router, token, existing := queryFixture(t)
+	res := adminRequest(router, token, http.MethodPost, "/api/admin/tasks", `{"title":"reuse project","project_id":`+itoa(existing.ProjectID)+`}`)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"project_id":`+itoa(existing.ProjectID)) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestAdminWorkspaceRepairRequiresExplicitDirection(t *testing.T) {
+	router, token, task := queryFixture(t)
+	res := adminRequest(router, token, http.MethodPost, "/api/admin/tasks/"+itoa(task.ID)+"/workspace/repair", `{"direction":"automatic"}`)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestAdminQueryReturnsWorkflowCollections(t *testing.T) {
 	router, token, task := queryFixture(t)
 	for _, path := range []string{
 		"/api/admin/projects",
 		"/api/admin/tasks/" + itoa(task.ID) + "/events",
 		"/api/admin/tasks/" + itoa(task.ID) + "/match",
+		"/api/admin/tasks/" + itoa(task.ID) + "/workspace",
 		"/api/admin/mrs?task_id=" + itoa(task.ID),
 		"/api/admin/issues?task_id=" + itoa(task.ID),
 	} {
@@ -71,7 +89,8 @@ func queryFixture(t *testing.T) (http.Handler, string, tasks.Task) {
 	issueSvc := issues.NewService(conn, bus)
 	mrSvc := mr.NewService(cfg, conn, bus, nil, issueSvc)
 	assignmentSvc := assignments.NewService(cfg, conn)
-	router := NewRouter(Dependencies{DB: conn, Bus: bus, Tasks: taskSvc, Issues: issueSvc, MR: mrSvc, Assignments: assignmentSvc})
+	workspaceSvc := workspaces.NewService(cfg, conn, bus)
+	router := NewRouter(Dependencies{DB: conn, Bus: bus, Tasks: taskSvc, Issues: issueSvc, MR: mrSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc})
 	res := adminRequest(router, "", http.MethodPost, "/api/admin/bootstrap", `{"username":"admin","password":"secret123"}`)
 	var auth struct {
 		Token string `json:"token"`

@@ -17,6 +17,7 @@ import (
 	"wanxiang-agent/server/internal/mr"
 	"wanxiang-agent/server/internal/planning"
 	"wanxiang-agent/server/internal/tasks"
+	"wanxiang-agent/server/internal/workspaces"
 )
 
 type App struct {
@@ -25,6 +26,7 @@ type App struct {
 	Launcher    *agents.Launcher
 	Planning    *planning.Worker
 	Assignments *assignments.Worker
+	Workspaces  *workspaces.Worker
 	HTTP        httpapi.Dependencies
 }
 
@@ -56,17 +58,24 @@ func New(cfg config.Config) (*App, error) {
 	assignmentSvc := assignments.NewService(cfg, conn)
 	assignmentWorker := assignments.NewWorker(conn, assignmentSvc, 2*time.Second)
 	assignmentWorker.Start()
+	workspaceSvc := workspaces.NewService(cfg, conn, bus)
+	workspaceWorker := workspaces.NewWorker(conn, workspaceSvc, 2*time.Second)
+	workspaceWorker.Start()
 	return &App{
 		Config:      cfg,
 		DB:          conn,
 		Launcher:    launcher,
 		Planning:    planningWorker,
 		Assignments: assignmentWorker,
-		HTTP:        httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc},
+		Workspaces:  workspaceWorker,
+		HTTP:        httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc},
 	}, nil
 }
 
 func (a *App) Close() error {
+	if a.Workspaces != nil {
+		a.Workspaces.Close()
+	}
 	if a.Assignments != nil {
 		a.Assignments.Close()
 	}

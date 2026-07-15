@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { api, overrideTaskMatch, saveAgentConfig } from './client'
+import { api, cleanupTaskWorkspace, createAdminTask, overrideTaskMatch, repairTaskWorkspace, saveAgentConfig } from './client'
 import { useAuthStore } from '../stores/auth'
 
 describe('authenticated API client', () => {
@@ -71,5 +71,20 @@ describe('authenticated API client', () => {
 	expect(url).toBe('/api/admin/tasks/12/match')
 	expect(init?.method).toBe('PUT')
 	expect(JSON.parse(String(init?.body))).toEqual({ step_id: 34, agent_name: 'worker-a' })
+  })
+
+  it('reuses a project only by registered project id', async () => {
+    await createAdminTask('follow-up', 'same repository', 42)
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/admin/tasks')
+    expect(JSON.parse(String(init?.body))).toEqual({ title: 'follow-up', description: 'same repository', project_id: 42 })
+  })
+
+  it('uses explicit workspace repair and cleanup requests', async () => {
+    await repairTaskWorkspace(12, 'git_snapshot')
+    await cleanupTaskWorkspace(12, 'request', true)
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/admin/tasks/12/workspace/repair')
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))).toEqual({ direction: 'git_snapshot' })
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body))).toEqual({ action: 'request', confirmed: true })
   })
 })

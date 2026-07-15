@@ -13,6 +13,7 @@ import (
 
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/events"
+	"wanxiang-agent/server/internal/files"
 	"wanxiang-agent/server/internal/gitx"
 )
 
@@ -174,7 +175,8 @@ func validTransition(current, next string) bool {
 	allowed := map[string]map[string]bool{
 		"created":           {"planning": true, "blocked": true},
 		"planning":          {"assigned": true, "blocked": true},
-		"assigned":          {"in_progress": true, "blocked": true},
+		"assigned":          {"workspace_ready": true, "in_progress": true, "blocked": true},
+		"workspace_ready":   {"in_progress": true, "blocked": true},
 		"in_progress":       {"review": true, "blocked": true, "interrupted": true},
 		"interrupted":       {"in_progress": true, "blocked": true},
 		"review":            {"merged": true, "changes_requested": true, "blocked": true},
@@ -193,6 +195,17 @@ func NewService(cfg config.Config, db *sql.DB, bus *events.Bus) *Service {
 }
 
 func (s *Service) CreateTask(ctx context.Context, title, description string, actors ...string) (task Task, err error) {
+	return s.CreateTaskWithInput(ctx, CreateTaskInput{Title: title, Description: description}, actors...)
+}
+
+func (s *Service) CreateTaskWithInput(ctx context.Context, input CreateTaskInput, actors ...string) (task Task, err error) {
+	if strings.TrimSpace(input.Title) == "" {
+		return Task{}, errors.New("task title is required")
+	}
+	if input.ProjectID != nil {
+		return s.createTaskInExistingProject(ctx, input, actors...)
+	}
+	title, description := input.Title, input.Description
 	slug := fmt.Sprintf("task-%s-%s", time.Now().UTC().Format("20060102150405"), slugify(title))
 	projectDir := filepath.Join(s.cfg.ProjectDir, slug)
 	if _, statErr := os.Stat(projectDir); statErr == nil {
@@ -238,7 +251,7 @@ func (s *Service) CreateTask(ctx context.Context, title, description string, act
 	if out, err := gitx.Run(ctx, projectDir, "add", "."); err != nil {
 		return Task{}, fmt.Errorf("git add failed: %w: %s", err, strings.TrimSpace(out))
 	}
-	if out, err := gitx.Run(ctx, projectDir, "commit", "-m", "chore: initialize task project", "--allow-empty"); err != nil {
+	if out, err := gitx.Run(ctx, projectDir, "commit", "-m", "工程：初始化任务项目", "--allow-empty"); err != nil {
 		return Task{}, fmt.Errorf("git commit failed: %w: %s", err, strings.TrimSpace(out))
 	}
 
@@ -270,6 +283,47 @@ func (s *Service) CreateTask(ctx context.Context, title, description string, act
 	if err := s.bus.PublishJSON(ctx, &taskID, "task.created", actor, map[string]any{
 		"task_id": taskID, "project_id": projectID, "project_slug": slug, "title": title, "status": task.Status,
 	}); err != nil {
+		return Task{}, err
+	}
+	return task, nil
+}
+
+func (s *Service) createTaskInExistingProject(ctx context.Context, input CreateTaskInput, actors ...string) (Task, error) {
+	var slug, projectDir string
+	err := s.db.QueryRowContext(ctx, `select slug,dir from projects where id=?`, *input.ProjectID).Scan(&slug, &projectDir)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Task{}, ErrProjectNotFound
+	}
+	if err != nil {
+		return Task{}, err
+	}
+	checked, err := files.UnderRoot(s.cfg.ProjectDir, projectDir)
+	if err != nil {
+		return Task{}, fmt.Errorf("%w: unsafe project path", ErrProjectConflict)
+	}
+	if info, statErr := os.Stat(checked); statErr != nil || !info.IsDir() {
+		return Task{}, fmt.Errorf("%w: project directory unavailable", ErrProjectConflict)
+	}
+	branch, branchErr := gitx.Run(ctx, checked, "branch", "--show-current")
+	if branchErr != nil || strings.TrimSpace(branch) != "main" {
+		return Task{}, fmt.Errorf("%w: project must be on main", ErrProjectConflict)
+	}
+	status, statusErr := gitx.Run(ctx, checked, "status", "--porcelain")
+	if statusErr != nil || strings.TrimSpace(status) != "" {
+		return Task{}, fmt.Errorf("%w: project worktree must be clean", ErrProjectConflict)
+	}
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := s.db.ExecContext(ctx, `insert into tasks(project_id,title,description,status,priority,created_at) values(?,?,?,?,0,?)`, *input.ProjectID, input.Title, input.Description, "created", createdAt)
+	if err != nil {
+		return Task{}, err
+	}
+	taskID, _ := result.LastInsertId()
+	actor := "admin"
+	if len(actors) > 0 && actors[0] != "" {
+		actor = actors[0]
+	}
+	task := Task{ID: taskID, ProjectID: *input.ProjectID, ProjectSlug: slug, Title: input.Title, Description: input.Description, Status: "created"}
+	if err := s.bus.PublishJSON(ctx, &taskID, "task.created", actor, map[string]any{"task_id": taskID, "project_id": *input.ProjectID, "project_slug": slug, "title": input.Title, "status": task.Status}); err != nil {
 		return Task{}, err
 	}
 	return task, nil

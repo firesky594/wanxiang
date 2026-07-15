@@ -49,7 +49,7 @@ next_action: 下一项可立即执行的动作
 | 链路节点 | 状态 | 当前实现和缺口 |
 | --- | --- | --- |
 | 管理员初始化、登录和会话 | 已实现 | `server/internal/httpapi/handlers_auth.go` 和 `auth/` 已覆盖 |
-| 用户提交任务 | 部分实现 | 能创建任务、项目目录和 Git 仓库；不能选择或复用已有项目 |
+| 用户提交任务 | 已实现 | 可新建项目或按已登记项目 ID 复用，复用前校验路径、main 分支和干净状态 |
 | 总管理解目标和拆分工作包 | 已实现 | planning Worker 调用 manager Provider 并校验结构化规划 |
 | 生成工作包和依赖图 | 已实现 | 规划结果事务化写入 `task_steps`、`workflow_edges`、摘要和事件 |
 | 估算 Agent 数量和并发度 | 部分实现 | 匹配时按工作包和 `max_concurrency` 分配；尚无独立估算结果 |
@@ -58,9 +58,9 @@ next_action: 下一项可立即执行的动作
 | 创建缺失 Agent | 已实现 | 无候选时生成不含密钥的 Agent 骨架并进入 `blocked: missing_config` |
 | Provider 真实探测 | 已实现 | OpenAI 和 DeepSeek 均有适配器和测试 |
 | 配置完成后恢复调度 | 部分实现 | planning 和 matching 均可自动恢复；执行、审核阶段待后续 Mission 接入 |
-| 创建或选择 Project | 部分实现 | `CreateTask` 固定创建新项目并初始化 `main` |
-| `project.yaml` 和 assignments | 部分实现 | 数据库已有工作包 assignment、负责人和汇报对象；项目文件和分支策略留给 M04 |
-| Agent 独立分支和 worktree | 未实现 | 平台没有自动创建、登记或清理能力 |
+| 创建或选择 Project | 已实现 | 管理台与后端支持新建或按数据库 ID 复用已有项目，不接受任意客户端路径 |
+| `project.yaml` 和 assignments | 已实现 | 数据库运行状态与 `.wanxiang/` Git 快照双向印证，漂移不静默覆盖 |
+| Agent 独立分支和 worktree | 已实现 | 自动创建独立分支/worktree，登记双提交、范围和状态，支持校验与确认清理 |
 | Agent 任务租约和断点恢复 | 未实现 | 只有 Agent 在线心跳，没有任务级租约、checkpoint 和恢复器 |
 | 启动执行 Agent | 未实现 | Launcher 只执行 Provider 探测和心跳，不启动 Codex、CLI 或 Agent 进程 |
 | Agent 消费任务并修改代码 | 未实现 | 没有任务队列、命令执行器或项目写入协议 |
@@ -73,7 +73,7 @@ next_action: 下一项可立即执行的动作
 | 总管汇总和用户验收 | 未实现 | 没有结果汇总、验收或返工状态流转 |
 | 自动测试、重试、回滚和发布 | 未实现 | 没有编排服务 |
 | 查询列表和刷新恢复 | 已实现 | 管理员 API 提供任务、项目、MR、Issue 和事件查询；任务页先加载持久快照再连接 SSE |
-| Agent scope 权限 | 未实现 | `agent_tokens.scopes` 已建表但认证中未执行 |
+| Agent scope 权限 | 部分实现 | workspace ownership 已校验 Agent、task、step 和路径范围；M05 写接口继续叠加 lease 与 token scope |
 
 当前实际链路停在：
 
@@ -87,7 +87,9 @@ next_action: 下一项可立即执行的动作
   -> planning Worker 生成工作包和依赖图
   -> matching Worker 过滤、评分并保存 assignment
   -> 有候选时进入 assigned；无候选时进入 blocked: missing_config
-  -> 当前尚未创建独立 worktree 或启动执行 Agent
+  -> workspace Worker 提交 Git 元数据并创建独立分支和 worktree
+  -> 数据库、Git 快照和 worktree 校验一致后进入 workspace_ready
+  -> 当前尚未建立任务租约、checkpoint 或启动执行 Agent
 ```
 
 ## 3. 实施顺序
@@ -206,7 +208,48 @@ next_action: 开始 M04，生成项目元数据、分支策略和独立 worktree
 
 ### M04：项目元数据、assignment、分支和 worktree
 
-**状态：未开始，依赖 M03**
+**状态：待审核，依赖 M03（已满足）**
+
+```yaml
+status: 待审核
+agent: Codex
+branch: feat/mission-04
+base_commit: cb231e8
+checkpoint_commit: 988645d
+completed:
+  - 支持安全复用已登记且干净的 main 项目
+  - 增加 project_workspaces 数据状态和唯一约束
+  - 实现确定性 project 与 assignment YAML、哈希和安全校验
+  - 实现幂等 provision、中文元数据提交和独立 Agent worktree
+  - 支持 provision 中断恢复并拒绝未知分支或非空目录
+  - 实现数据库、Git 快照、分支和 worktree 双向漂移检测
+  - 实现显式修复方向、审计记录和确认式安全清理
+  - 接通 workspace 自动 provision 与周期漂移校验 Worker
+  - 增加管理员 workspace API 和 Agent assignment ownership 校验
+  - 管理台支持按项目 ID 复用项目并展示 workspace 漂移与清理操作
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
+    result: passed，所有 Go 包完成
+  - command: GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m04-bin ./cmd/wanxiang
+    result: passed
+  - command: npm test
+    result: 10 passed
+  - command: npm run build
+    result: passed，已生成 web/dist；存在非阻塞的大 chunk 警告
+risks:
+  - 项目级 provision 锁当前为单进程锁，多实例部署前需升级为数据库锁
+  - 清理 worktree 后保留 Agent 分支，后续由 MR 和保留策略决定删除时机
+frontend_build_required: true
+frontend_build_result: passed
+frontend_deployed: false
+frontend_deploy_reason: web/dist 已验证但未替换线上静态资源
+backend_build_required: true
+backend_build_result: passed
+backend_restart_required: true
+backend_restarted: false
+backend_restart_reason: 仅构建了 /tmp/wanxiang-m04-bin，尚未替换运行中的 server/wanxiang
+next_action: 经用户确认可信 origin 后，合并 feat/mission-04 到 main 并推送 origin/main
+```
 
 目标：建立可执行、可审计的项目范围和 Git 隔离环境。
 

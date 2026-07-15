@@ -81,7 +81,7 @@
 - [x] 写脏现场失败测试：允许 commit 为空、`clean=false` 的上下文型 checkpoint，保留未提交文件且不能作为接管基线。
 - [x] 实现规范化 YAML 镜像、SHA-256、Git 校验、幂等事务和 `task.step.checkpointed` 事件。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run Checkpoint`。
-- [ ] 提交：`功能：登记 Git 检查点与恢复摘要`。
+- [x] 提交：`功能：登记 Git 检查点与恢复摘要`（`e6924de`）。
 
 ### Task 4：过期扫描和原 Agent 恢复
 

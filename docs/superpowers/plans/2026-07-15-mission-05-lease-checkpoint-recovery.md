@@ -60,7 +60,7 @@
 - [x] 写失败测试：Lease Guard 拒绝绝对路径、`..`、scope 外路径和非 assignment Agent。
 - [x] 实现随机 lease ID、事务化领取、条件心跳和统一 Guard。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Acquire|Heartbeat|Authorize'`。
-- [ ] 提交：`功能：实现任务租约领取与心跳校验`。
+- [x] 提交：`功能：实现任务租约领取与心跳校验`（`9563e74`）。
 
 ### Task 3：Git Checkpoint 和上下文摘要
 

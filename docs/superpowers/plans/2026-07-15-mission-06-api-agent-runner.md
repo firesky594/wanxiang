@@ -51,11 +51,11 @@
 - Consumes: `leases.Service.Authorize`。
 - Produces: `ReadFile(context.Context, LeaseRef, path string)`、`WriteFile(...)` 和 `Redact(string)`。
 
-- [ ] 写失败测试：只允许 scope 内普通文件，拒绝绝对路径、`..`、符号链接、`.git`、env、平台源码和越权 lease。
-- [ ] 写失败测试：写入使用同目录临时文件和原子替换，失败不破坏原文件。
-- [ ] 写脱密失败测试：API key、Bearer token、密码字段和 env 行被替换，普通错误保留且总长度受限。
-- [ ] 实现受控读写、大小限制、符号链接检查和脱密。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'ReadFile|WriteFile|Redact'`。
+- [x] 写失败测试：只允许 scope 内普通文件，拒绝绝对路径、`..`、符号链接、`.git`、env、平台源码和越权 lease。
+- [x] 写失败测试：写入使用同目录临时文件和原子替换，失败不破坏原文件。
+- [x] 写脱密失败测试：API key、Bearer token、密码字段和 env 行被替换，普通错误保留且总长度受限。
+- [x] 实现受控读写、大小限制、符号链接检查和脱密。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'ReadFile|WriteFile|Redact'`。
 - [ ] 提交：`功能：实现租约约束的 Agent 文件工具`。
 
 ### Task 3：允许列表测试命令与 Git checkpoint

@@ -376,6 +376,9 @@ completed:
   - 已建立 m06-smoke 低量测试 Agent，并在不覆盖源文件的前提下复制 manager env，权限均为 0600
   - Task 1 已实现不覆盖、拒绝符号链接且固定 0600 的测试 env 引导
   - Task 1 已增加 executor_runs、executor_actions、唯一约束和无秘密执行协议类型
+  - Task 2 已实现 Lease 与 workspace scope 双重约束的受控文件读写
+  - Task 2 已拒绝越界、符号链接、env、Git 元数据、部署目录和平台治理文档
+  - Task 2 已实现原子写入、文件大小限制和 API key、Bearer、密码、env 行脱密
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
@@ -385,8 +388,12 @@ tests:
     result: passed，内容一致且目标均为 0600；未输出 env 内容
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task1-bin ./cmd/wanxiang
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/executor -run 'ReadFile|WriteFile|Redact'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task2-bin ./cmd/wanxiang
+    result: passed；首次受限沙箱不允许 httptest 回环监听，授权本地测试端口后重跑通过
 risks:
-  - 当前只完成执行记录和测试配置引导，受控工具与 Worker 尚未实现
+  - 受控测试命令、Git checkpoint、Provider 动作循环与 Worker 仍待实现
 frontend_build_required: false
 frontend_build_result: not_required
 frontend_build_reason: 当前只新增后端设计和被 Git 忽略的测试 Agent 配置
@@ -399,17 +406,17 @@ backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 实施 M06 Task 2 的受控文件工具和全链路脱密
+next_action: 实施 M06 Task 3 的允许列表测试命令与 Git checkpoint
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。
 
 实施范围：
 
-- 定义执行器接口，首个实现负责启动和监管本地 Codex/CLI 进程。
+- 定义执行器接口，首个实现只启动和监管调用远程 Provider API 的 Go Worker 子进程。
 - 运行时注入 Agent 自身 Provider 配置、任务令牌和项目范围。
 - 只把 Agent 分配到自己的 worktree，不给平台根目录写权限。
-- 捕获标准输出、退出码、心跳、Token 用量和检查点请求。
+- 只通过允许列表工具执行检查，捕获脱密输出、退出码、心跳、Token 用量和检查点请求。
 - 进程异常退出时触发 M05 中断流程。
 
 验收：

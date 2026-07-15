@@ -12,11 +12,24 @@ var (
 	ErrCheckpointMismatch = errors.New("checkpoint_mismatch")
 	ErrBranchOwnership    = errors.New("branch_ownership")
 	ErrStateConflict      = errors.New("state_conflict")
+	ErrMergeBlocked       = errors.New("merge_blocked")
 )
 
 type Principal struct {
 	Name string `json:"agent_name"`
 	Role string `json:"role"`
+}
+
+type MergeInput struct {
+	AgentName      string `json:"agent_name"`
+	Role           string `json:"role"`
+	TakeoverReason string `json:"takeover_reason"`
+}
+
+type MergeResult struct {
+	MRID        int64  `json:"mr_id"`
+	Status      string `json:"status"`
+	MergeCommit string `json:"merge_commit"`
 }
 
 const (

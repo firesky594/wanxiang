@@ -73,6 +73,24 @@ func TestServiceBlocksInvalidPlanningOutputWithoutLeakingIt(t *testing.T) {
 	assertCount(t, conn, "task_steps", 0)
 }
 
+func TestServicePlansReworkIntoNewVersionWithoutChangingHistory(t *testing.T) {
+	cfg, conn, taskID := planningFixture(t)
+	_, _ = conn.Exec(`update tasks set status='rework_planning' where id=?`, taskID)
+	_, _ = conn.Exec(`insert into task_plan_versions(task_id,version,status,summary,created_at) values(?,1,'completed','old','now')`, taskID)
+	_, _ = conn.Exec(`insert into task_steps(task_id,agent_name,kind,status,input,created_at,plan_version) values(?,'worker','backend','completed','{}','now',1)`, taskID)
+	fake := &fakePlanner{result: providers.Result{Content: `{"summary":"rework","work_items":[{"key":"fix","title":"修正","description":"补充","kind":"backend","required_capabilities":["go"],"acceptance_criteria":["测试通过"],"depends_on":[]}]}`}}
+	plan, err := NewService(cfg, conn, fake).PlanRework(t.Context(), taskID, 2, "补充移动端")
+	if err != nil || plan.Summary != "rework" {
+		t.Fatalf("plan=%#v err=%v", plan, err)
+	}
+	var oldCount, newCount int
+	_ = conn.QueryRow(`select count(*) from task_steps where task_id=? and plan_version=1 and status='completed'`, taskID).Scan(&oldCount)
+	_ = conn.QueryRow(`select count(*) from task_steps where task_id=? and plan_version=2 and status='created'`, taskID).Scan(&newCount)
+	if oldCount != 1 || newCount != 1 {
+		t.Fatalf("old=%d new=%d", oldCount, newCount)
+	}
+}
+
 func planningFixture(t *testing.T) (config.Config, *sql.DB, int64) {
 	t.Helper()
 	cfg, _ := config.Load(t.TempDir())

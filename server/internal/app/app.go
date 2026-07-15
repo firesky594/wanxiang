@@ -11,6 +11,7 @@ import (
 	"wanxiang-agent/server/internal/assignments"
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/db"
+	"wanxiang-agent/server/internal/deliveries"
 	"wanxiang-agent/server/internal/events"
 	"wanxiang-agent/server/internal/executor"
 	"wanxiang-agent/server/internal/httpapi"
@@ -31,6 +32,7 @@ type App struct {
 	Workspaces    *workspaces.Worker
 	LeaseRecovery *leases.Worker
 	Executor      *executor.Supervisor
+	Deliveries    *deliveries.Worker
 	HTTP          httpapi.Dependencies
 }
 
@@ -56,7 +58,13 @@ func New(cfg config.Config) (*App, error) {
 	issueSvc := issues.NewService(conn, bus)
 	taskSvc := tasks.NewService(cfg, conn, bus)
 	mrSvc := mr.NewService(cfg, conn, bus, agentSvc, issueSvc)
+	deliverySvc := deliveries.NewService(conn, bus)
 	planningSvc := planning.NewService(cfg, conn, agentSvc)
+	deliveryWorker := deliveries.NewWorker(conn, deliverySvc, 2*time.Second, func(ctx context.Context, taskID, version int64, reason string) error {
+		_, err := planningSvc.PlanRework(ctx, taskID, version, reason)
+		return err
+	})
+	deliveryWorker.Start()
 	planningWorker := planning.NewWorker(conn, planningSvc, agentSvc, 2*time.Second)
 	planningWorker.Start()
 	assignmentSvc := assignments.NewService(cfg, conn)
@@ -79,11 +87,15 @@ func New(cfg config.Config) (*App, error) {
 		Workspaces:    workspaceWorker,
 		LeaseRecovery: leaseWorker,
 		Executor:      executorSupervisor,
-		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc, Executor: executor.NewAdminService(conn, executorSupervisor)},
+		Deliveries:    deliveryWorker,
+		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc, Executor: executor.NewAdminService(conn, executorSupervisor), Deliveries: deliverySvc},
 	}, nil
 }
 
 func (a *App) Close() error {
+	if a.Deliveries != nil {
+		a.Deliveries.Close()
+	}
 	if a.Executor != nil {
 		a.Executor.Close()
 	}

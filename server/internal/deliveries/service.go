@@ -94,6 +94,14 @@ func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snap
 		return Snapshot{}, err
 	}
 	id, _ := res.LastInsertId()
+	for _, risk := range evidence.Risks {
+		if isHighRisk(risk) {
+			title := fmt.Sprintf("交付版本 %d 高风险事项需单独确认", version)
+			if _, err = tx.ExecContext(ctx, `insert into issues(task_id,title,body,status,blocking,created_by,created_at) values(?,?,?,'blocking',1,'manager',?)`, taskID, title, risk, now); err != nil {
+				return Snapshot{}, err
+			}
+		}
+	}
 	if _, err = tx.ExecContext(ctx, `update manager_notifications set status='consumed',consumed_at=?,last_error='',next_retry_at=null where task_id=? and status='pending'`, now, taskID); err != nil {
 		return Snapshot{}, err
 	}
@@ -171,4 +179,93 @@ func redactError(err error) string {
 		value = value[:1024]
 	}
 	return value
+}
+
+func isHighRisk(value string) bool {
+	lower := strings.ToLower(value)
+	for _, word := range []string{"部署", "生产", "删除", "删库", "迁移", "权限", "密钥", "secret", "deploy", "production"} {
+		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([]Snapshot, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := `select id,task_id,project_id,version,manager_notification_id,main_commit,status,summary,summary_hash,evidence_json,created_by,created_at from delivery_snapshots`
+	args := []any{}
+	if taskID != nil {
+		query += ` where task_id=?`
+		args = append(args, *taskID)
+	}
+	query += ` order by id desc limit ? offset ?`
+	args = append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Snapshot{}
+	for rows.Next() {
+		var item Snapshot
+		var raw string
+		if err = rows.Scan(&item.ID, &item.TaskID, &item.ProjectID, &item.Version, &item.ManagerNotificationID, &item.MainCommit, &item.Status, &item.Summary, &item.SummaryHash, &raw, &item.CreatedBy, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(raw), &item.Evidence)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+func (s *Service) Detail(ctx context.Context, id int64) (Detail, error) {
+	snap, err := s.loadSnapshot(ctx, `where id=?`, id)
+	if err != nil {
+		return Detail{}, err
+	}
+	detail := Detail{Snapshot: snap, Decisions: []AcceptanceDecision{}, ReworkRounds: []ReworkRound{}}
+	rows, err := s.db.QueryContext(ctx, `select id,snapshot_id,task_id,decision,comment,created_by,created_at from acceptance_decisions where snapshot_id=? order by id`, id)
+	if err != nil {
+		return Detail{}, err
+	}
+	for rows.Next() {
+		var d AcceptanceDecision
+		if err = rows.Scan(&d.ID, &d.SnapshotID, &d.TaskID, &d.Decision, &d.Comment, &d.CreatedBy, &d.CreatedAt); err != nil {
+			rows.Close()
+			return Detail{}, err
+		}
+		detail.Decisions = append(detail.Decisions, d)
+	}
+	rows.Close()
+	rounds, err := s.ListRework(ctx, snap.TaskID)
+	if err != nil {
+		return Detail{}, err
+	}
+	for _, r := range rounds {
+		if r.SourceSnapshotID == id {
+			detail.ReworkRounds = append(detail.ReworkRounds, r)
+		}
+	}
+	return detail, nil
+}
+func (s *Service) ListRework(ctx context.Context, taskID int64) ([]ReworkRound, error) {
+	rows, err := s.db.QueryContext(ctx, `select id,task_id,source_snapshot_id,decision_id,round,plan_version,reason,status,last_error,created_by,created_at from rework_rounds where task_id=? order by round`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReworkRound{}
+	for rows.Next() {
+		var r ReworkRound
+		if err = rows.Scan(&r.ID, &r.TaskID, &r.SourceSnapshotID, &r.DecisionID, &r.Round, &r.PlanVersion, &r.Reason, &r.Status, &r.LastError, &r.CreatedBy, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
 }

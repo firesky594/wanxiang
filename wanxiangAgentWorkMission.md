@@ -539,7 +539,7 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ```yaml
 mission: M08
-phase: backend_core
+phase: backend_api_complete
 branch: feat/mission-08
 checkpoint_commit: 0114759
 completed:
@@ -549,11 +549,15 @@ completed:
   - 已按 wanxiangAgent.md 校对角色、权限、高风险确认和恢复边界
   - 已编写 M08 测试驱动实施计划
   - 已实现计划版本、不可变交付快照、验收决定、返工轮次和通知恢复 Worker
+  - 已实现 manager Provider 返工规划恢复、管理员交付 API 和应用生命周期
+  - 已实现高风险事项自动转独立阻塞 Issue，验收不附带授权
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/db
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/planning ./internal/httpapi ./internal/app
+    result: passed
 blockers: []
-next_action: 接入返工规划、管理员交付 API 和应用生命周期
+next_action: 实现 /deliveries Web 页面、交互测试和生产构建
 ```
 
 ### M09：测试、重试、回滚和发布编排

@@ -262,6 +262,59 @@ export interface MergeRequest {
   source_branch: string
   target_branch: string
   status: string
+	step_id: number
+	report_id: number
+	report_version: number
+	source_commit: string
+	project_lead: string
+}
+
+export interface TestEvidence {
+  command: string
+  status: string
+  summary?: string
+}
+
+export interface CompletionReport {
+  id: number
+  agent_name: string
+  agent_role: string
+  version: number
+  source_branch: string
+  checkpoint_commit: string
+  head_commit: string
+  completed: string[]
+  incomplete: string[]
+  key_files: string[]
+  tests: TestEvidence[]
+  risks: string[]
+  user_decision?: string
+  created_at: string
+}
+
+export interface MRReview {
+  id: number
+  reviewer: string
+  role: string
+  status: string
+  body: string
+  created_at: string
+}
+
+export interface MergeRequestDetail {
+  merge_request: MergeRequest
+  report: CompletionReport
+  reviews: MRReview[]
+}
+
+export async function listMergeRequests(): Promise<MergeRequestDetail[]> {
+  const response = await api<{ ok: boolean; merge_requests: MergeRequestDetail[] }>('/api/admin/mrs?limit=100')
+  return response.merge_requests
+}
+
+export async function getMergeRequest(id: number): Promise<MergeRequestDetail> {
+  const response = await api<{ ok: boolean; detail: MergeRequestDetail }>(`/api/admin/mrs/${id}`)
+  return response.detail
 }
 
 export interface Issue {

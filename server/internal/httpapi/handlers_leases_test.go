@@ -82,6 +82,7 @@ func leaseRouterFixture(t *testing.T) (http.Handler, *sql.DB, int64, int64, stri
 	_, _ = conn.Exec(`insert into project_workspaces(project_id,task_id,step_id,assignment_id,agent_name,branch_name,worktree_path,base_commit,provision_commit,write_scope_json,metadata_hash,status,created_at,updated_at) values(?,?,?,1,'agent-a','agent/agent-a/http','/tmp/http-worktree','base','base','["."]','hash','ready','now','now')`, projectID, taskID, stepID)
 	tokenA, tokenB := "agent-a-token", "agent-b-token"
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, _ = conn.Exec(`insert into agent_registry(name,role,dir,status) values('agent-a','worker','agents/agent-a','ready'),('agent-b','worker','agents/agent-b','ready')`)
 	_, _ = conn.Exec(`insert into agent_tokens(agent_name,token_hash,scopes,created_at) values('agent-a',?,'runtime',?)`, auth.HashSecret(tokenA), now)
 	_, _ = conn.Exec(`insert into agent_tokens(agent_name,token_hash,scopes,created_at) values('agent-b',?,'runtime',?)`, auth.HashSecret(tokenB), now)
 	workspaceSvc := workspaces.NewService(config.Config{}, conn, nil)

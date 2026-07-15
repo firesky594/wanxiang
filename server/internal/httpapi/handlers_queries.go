@@ -103,12 +103,46 @@ func handleListMRs(svc *mr.Service) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		items, err := svc.List(r.Context(), taskID, limit, offset)
+		items, err := svc.AdminList(r.Context(), taskID, limit, offset)
 		if err != nil {
 			writeJSON(w, 500, errorBody(err))
 			return
 		}
 		writeJSON(w, 200, map[string]any{"ok": true, "merge_requests": items})
+	}
+}
+
+func handleGetMR(svc *mr.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := resourceID(w, r)
+		if !ok {
+			return
+		}
+		detail, err := svc.AdminDetail(r.Context(), id)
+		if errors.Is(err, mr.ErrStateConflict) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "merge request not found"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "merge request query failed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "detail": detail})
+	}
+}
+
+func handleListManagerNotifications(svc *mr.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limit, offset, ok := pagination(w, r)
+		if !ok {
+			return
+		}
+		items, err := svc.ListNotifications(r.Context(), limit, offset)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorCode("notification_query_failed"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "notifications": items})
 	}
 }
 

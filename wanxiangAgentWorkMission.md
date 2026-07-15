@@ -478,7 +478,7 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ### M07：完成报告、MR 和审核链路
 
-**状态：设计和实施计划已确认，等待执行；依赖 M03 至 M06 已满足**
+**状态：代码与全量测试完成，等待合并和生产部署**
 
 目标：让执行 Agent 提交结构化完成报告，并按项目负责人决策进入审核和合并。
 
@@ -498,6 +498,21 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 - 执行 Agent 不能伪造 `created_by`、`agent_name`、`role` 或项目负责人身份。
 - 多 Agent 项目由负责人按依赖顺序集成；单 Agent 项目由该 Agent 以负责人身份自审自合并。
 - 每次合入项目 `main` 后，服务向 manager 写入结构化通知。
+
+交付证据：
+
+- 数据库新增完成报告、MR 版本、审核和 manager 通知结构。
+- Agent 写接口强制交叉校验 Token、`agent_name`、`role`、任务、步骤、租约、checkpoint、HEAD、项目负责人和分支归属。
+- 单 Agent 自审自合并、多 Agent 负责人审核、manager 有因接管、阻塞 Issue、依赖、`--no-ff`、冲突 abort 和 Git/数据库对账均有自动化测试。
+- 管理台 MR 页面已改为只读审核轨道，不再调用 `/api/agent/*`。
+- Go 全量测试：`GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=120s ./...`，通过。
+- Web 全量测试：5 个测试文件、13 个用例通过。
+- Web 生产构建：`vue-tsc -b` 与 Vite build 通过；保留现有 chunk-size warning。
+- 后端候选二进制：`/tmp/wanxiang-m07`，SHA-256 `6dbfc2c29dc75cab00b592d131cb5a2ae97f534b69cd84f4ab2fe061b47ded4b`。
+- 变更差异密钥扫描命中 0。
+- `frontend_build_required: true`，`frontend_deployed: false`。
+- `backend_build_required: true`，`backend_restart_required: true`，`backend_restarted: false`。
+- 提交链：`d12dbcc`、`5ee0dee`、`ff0c2b1`、`abea864`、`e23e2bc`、`9bd2d87`、`8011e22`。
 
 ### M08：总管汇总、用户验收和返工
 

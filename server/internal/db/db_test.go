@@ -31,6 +31,44 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 	}
 }
 
+func TestMission07MigrationCreatesReportReviewAndNotificationSchema(t *testing.T) {
+	conn, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := Migrate(t.Context(), conn); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(t.Context(), conn); err != nil {
+		t.Fatalf("second migration: %v", err)
+	}
+
+	required := map[string][]string{
+		"completion_reports":    {"project_id", "task_id", "step_id", "lease_id", "lease_version", "agent_name", "agent_role", "version", "source_branch", "checkpoint_commit", "head_commit", "completed_json", "incomplete_json", "key_files_json", "tests_json", "risks_json", "dependencies_json", "merge_order_json", "user_decision", "created_at"},
+		"merge_requests":        {"report_id", "step_id", "lease_id", "report_version", "source_commit", "project_lead", "reviewed_at", "approved_at", "merged_by", "merge_commit"},
+		"manager_notifications": {"project_id", "task_id", "mr_id", "report_id", "project_lead", "main_commit", "payload_json", "status", "created_at"},
+	}
+	for table, columns := range required {
+		for _, column := range columns {
+			var count int
+			if err := conn.QueryRow(`select count(*) from pragma_table_info(?) where name=?`, table, column).Scan(&count); err != nil {
+				t.Fatalf("%s.%s: %v", table, column, err)
+			}
+			if count != 1 {
+				t.Errorf("missing %s.%s", table, column)
+			}
+		}
+	}
+
+	if _, err := conn.Exec(`insert into completion_reports(project_id,task_id,step_id,lease_id,lease_version,agent_name,agent_role,version,source_branch,checkpoint_commit,head_commit,completed_json,incomplete_json,key_files_json,tests_json,risks_json,dependencies_json,merge_order_json,user_decision,created_at) values(1,1,1,'lease',1,'agent','worker',1,'agent/a/task','abc','abc','[]','[]','[]','[]','[]','[]','[]','','now')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`insert into completion_reports(project_id,task_id,step_id,lease_id,lease_version,agent_name,agent_role,version,source_branch,checkpoint_commit,head_commit,completed_json,incomplete_json,key_files_json,tests_json,risks_json,dependencies_json,merge_order_json,user_decision,created_at) values(1,1,1,'lease',1,'agent','worker',1,'agent/a/task','abc','abc','[]','[]','[]','[]','[]','[]','[]','','now')`); err == nil {
+		t.Fatal("duplicate report version accepted")
+	}
+}
+
 func TestExecutorMigrationIsIdempotentAndConstrained(t *testing.T) {
 	conn, err := Open(":memory:")
 	if err != nil {

@@ -20,6 +20,10 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`create table if not exists workflow_edges (id integer primary key, task_id integer not null, from_step_id integer, to_step_id integer, label text not null, created_at text not null)`,
 		`create table if not exists merge_requests (id integer primary key, project_id integer not null, task_id integer not null, title text not null, source_branch text not null, target_branch text not null, status text not null, test_status text not null default 'pending', manager_status text not null default 'pending', created_by text not null, created_at text not null, merged_at text)`,
 		`create table if not exists mr_reviews (id integer primary key, mr_id integer not null, reviewer text not null, role text not null, status text not null, body text not null, created_at text not null)`,
+		`create table if not exists completion_reports (id integer primary key, project_id integer not null, task_id integer not null, step_id integer not null, lease_id text not null, lease_version integer not null, agent_name text not null, agent_role text not null, version integer not null, source_branch text not null, checkpoint_commit text not null, head_commit text not null, completed_json text not null, incomplete_json text not null, key_files_json text not null, tests_json text not null, risks_json text not null, dependencies_json text not null, merge_order_json text not null, user_decision text not null default '', created_at text not null, unique(task_id,step_id,version), unique(lease_id,version))`,
+		`create index if not exists idx_completion_reports_task_step on completion_reports(task_id,step_id,version)`,
+		`create table if not exists manager_notifications (id integer primary key, project_id integer not null, task_id integer not null, mr_id integer not null unique, report_id integer not null, project_lead text not null, main_commit text not null, payload_json text not null, status text not null default 'pending', created_at text not null, consumed_at text)`,
+		`create index if not exists idx_manager_notifications_status on manager_notifications(status,created_at)`,
 		`create table if not exists issues (id integer primary key, task_id integer, mr_id integer, title text not null, body text not null, status text not null, blocking integer not null default 0, created_by text not null, created_at text not null, closed_at text)`,
 		`create table if not exists runtime_events (id integer primary key, task_id integer, event_type text not null, actor text not null, payload_json text not null, created_at text not null)`,
 		`create table if not exists token_usage (id integer primary key, task_id integer, step_id integer, agent_name text not null, model text not null, input_tokens integer not null, output_tokens integer not null, created_at text not null)`,
@@ -75,10 +79,23 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		{"step_reassignments", "from_worktree", "text not null default ''"},
 		{"step_reassignments", "to_branch", "text not null default ''"},
 		{"step_reassignments", "to_worktree", "text not null default ''"},
+		{"merge_requests", "report_id", "integer"},
+		{"merge_requests", "step_id", "integer"},
+		{"merge_requests", "lease_id", "text not null default ''"},
+		{"merge_requests", "report_version", "integer not null default 0"},
+		{"merge_requests", "source_commit", "text not null default ''"},
+		{"merge_requests", "project_lead", "text not null default ''"},
+		{"merge_requests", "reviewed_at", "text"},
+		{"merge_requests", "approved_at", "text"},
+		{"merge_requests", "merged_by", "text not null default ''"},
+		{"merge_requests", "merge_commit", "text not null default ''"},
 	} {
 		if err := ensureColumn(ctx, conn, column.table, column.name, column.definition); err != nil {
 			return err
 		}
+	}
+	if _, err := conn.ExecContext(ctx, `create unique index if not exists idx_merge_requests_report_id on merge_requests(report_id) where report_id is not null`); err != nil {
+		return err
 	}
 	return nil
 }

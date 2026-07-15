@@ -208,14 +208,14 @@ next_action: 开始 M04，生成项目元数据、分支策略和独立 worktree
 
 ### M04：项目元数据、assignment、分支和 worktree
 
-**状态：待审核，依赖 M03（已满足）**
+**状态：已完成，依赖 M03（已满足）**
 
 ```yaml
-status: 待审核
+status: 已完成
 agent: Codex
 branch: feat/mission-04
 base_commit: cb231e8
-checkpoint_commit: 988645d
+checkpoint_commit: 6547ebf
 completed:
   - 支持安全复用已登记且干净的 main 项目
   - 增加 project_workspaces 数据状态和唯一约束
@@ -248,7 +248,7 @@ backend_build_result: passed
 backend_restart_required: true
 backend_restarted: false
 backend_restart_reason: 仅构建了 /tmp/wanxiang-m04-bin，尚未替换运行中的 server/wanxiang
-next_action: 经用户确认可信 origin 后，合并 feat/mission-04 到 main 并推送 origin/main
+next_action: 开始 M05，建立任务租约、Git checkpoint 和上下文摘要恢复链路
 ```
 
 目标：建立可执行、可审计的项目范围和 Git 隔离环境。

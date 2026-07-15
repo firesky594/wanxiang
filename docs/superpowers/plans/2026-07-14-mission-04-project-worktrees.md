@@ -156,4 +156,4 @@
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m04-bin ./cmd/wanxiang`。
 - [x] 运行 `npm test && npm run build`，生成并核验 `web/dist`。
 - [x] 在 `wanxiangAgentWorkMission.md` 更新链路核对、M04 状态、checkpoint、测试证据、风险、前端构建/部署和后端构建/重启判断。
-- [ ] 使用中文合并提交合并到 `main`，在主分支复核后推送 `origin/main`。
+- [x] 使用中文合并提交合并到 `main`，在主分支复核后推送 `origin/main`。

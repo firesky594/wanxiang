@@ -34,11 +34,11 @@
 - Produces: `task_step_leases`、`task_checkpoints`、`step_reassignments` 表。
 - Produces: `Clock` 接口和 `LeaseRef{TaskID, StepID int64; AgentName, LeaseID string; LeaseVersion int64}`。
 
-- [ ] 写失败数据库测试，检查新表、唯一约束、索引和现有数据库补列；迁移重复执行两次仍成功。
-- [ ] 写失败类型测试，验证 lease 状态、60 秒 TTL、5 分钟恢复窗口和公开 JSON 不返回其他 Agent 的敏感租约数据。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases -run 'Migrate|LeaseTypes'`，确认失败。
-- [ ] 实现幂等补列迁移、历史表、必要索引、系统时钟和 fake clock。
-- [ ] 重跑定向测试确认通过。
+- [x] 写失败数据库测试，检查新表、唯一约束、索引和现有数据库补列；迁移重复执行两次仍成功。
+- [x] 写失败类型测试，验证 lease 状态、60 秒 TTL、5 分钟恢复窗口和公开 JSON 不返回其他 Agent 的敏感租约数据。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases -run 'Migrate|LeaseTypes'`，确认失败。
+- [x] 实现幂等补列迁移、历史表、必要索引、系统时钟和 fake clock。
+- [x] 重跑定向测试确认通过。
 - [ ] 提交：`数据库：增加任务租约与检查点结构`。
 
 ### Task 2：领取、心跳和统一 Lease Guard

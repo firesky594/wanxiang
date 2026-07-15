@@ -269,7 +269,32 @@ next_action: 开始 M05，建立任务租约、Git checkpoint 和上下文摘要
 
 ### M05：任务租约、Git checkpoint 和上下文摘要
 
-**状态：未开始，依赖 M01、M04**
+**状态：进行中，依赖 M01、M04（已满足）**
+
+```yaml
+status: 进行中
+agent: manager
+branch: feat/mission-05
+base_commit: ec90721
+checkpoint_commit: null
+completed:
+  - Task 1 已增加 task_steps 租约、心跳、checkpoint 和恢复字段的幂等迁移
+  - Task 1 已增加租约、checkpoint、接管历史表及唯一约束和查询索引
+  - Task 1 已增加租约状态、公开视图、系统时钟和可推进 fake clock
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases -run 'Migrate|LeaseTypes'
+    result: passed
+risks:
+  - 当前只完成数据结构；领取、心跳、恢复和接管服务将在后续 Task 实现
+frontend_build_required: false
+frontend_build_result: not_required
+backend_build_required: true
+backend_build_result: pending_mission_completion
+backend_restart_required: false
+backend_restarted: false
+backend_restart_reason: 当前为功能分支中的数据库与类型增量，尚未部署或替换运行中后端
+next_action: 实现 Task 2 的租约领取、心跳和统一 Lease Guard
+```
 
 目标：实现 `wanxiangAgent.md` 第 14 节规定的完整断点续接协议。
 

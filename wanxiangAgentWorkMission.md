@@ -362,14 +362,14 @@ next_action: 开始 M06，启动真实 Agent 执行器并强制复用 M05 Lease 
 
 ### M06：Agent 执行器和任务消费
 
-**状态：进行中，依赖 M02 至 M05（已满足）**
+**状态：代码已合并，待生产部署；依赖 M02 至 M05（已满足）**
 
 ```yaml
-status: 进行中
+status: 待生产部署
 agent: manager
-branch: feat/mission-06
+branch: main
 base_commit: aa2b3b2
-checkpoint_commit: 9175ff6
+checkpoint_commit: ac7ac40
 completed:
   - 已确认使用 Go 多 Worker 子进程，每个 Agent 只用自身 env 调用远程 Provider API
   - 已禁止本机 Codex、OpenCode、任意 AI CLI 和模型直连 shell
@@ -397,6 +397,7 @@ completed:
   - Task 7 已验证管理员鉴权；匿名与 Agent Token 均不能访问管理执行接口
   - Task 7 真实 Provider 低量验收以 1 次请求完成，input_tokens=161，output_tokens=95
   - Task 7 已扫描工作区、Git 跟踪内容、运行日志、进程参数、数据库审计字段和 API 响应，密钥命中均为 0
+  - M06 已以中文合并提交 ac7ac40 推送 origin/main
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
@@ -437,7 +438,7 @@ tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-final-bin ./cmd/wanxiang
     result: passed
 risks:
-  - 功能分支尚待合并 main、替换生产二进制并完成 PM2 和健康检查
+  - 生产二进制替换与 PM2 重启因需要明确生产操作授权尚未执行
 frontend_build_required: false
 frontend_build_result: not_required
 frontend_build_reason: M06 只增加后端管理 API，未修改 web 源码或管理台页面
@@ -445,12 +446,12 @@ backend_build_required: true
 backend_build_result: passed
 backend_restart_required: true
 backend_restarted: false
-backend_restart_reason: 当前只修改功能分支源码，尚未构建并替换 PM2 指向的生产二进制
+backend_restart_reason: 新二进制已构建且与当前生产二进制哈希不同；等待用户明确授权替换和重启
 backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
-backend_pm2_status: not_checked
-backend_healthcheck_result: not_checked
-next_action: 中文提交 Task 7，合并并推送 origin/main，部署后端并验证 PM2 与健康检查
+backend_pm2_status: online，当前仍运行旧二进制
+backend_healthcheck_result: passed，使用 curl --noproxy '*' 验证 /api/health 返回 200
+next_action: 用户明确授权后备份并替换 server/wanxiang，重启 PM2 wanxiang-agent，再验证健康检查和执行 API
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。

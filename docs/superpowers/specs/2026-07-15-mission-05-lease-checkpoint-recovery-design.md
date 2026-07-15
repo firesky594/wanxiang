@@ -139,3 +139,10 @@ Agent API：
 - 服务重启后使用同一 SQLite 和临时 Git 仓库恢复租约、checkpoint、摘要和 deadline。
 - 接管测试确认使用新分支和新 worktree，原 worktree 及未提交修改保持不变。
 - 完整 Go 测试、后端构建、前端测试和 `web/dist` 构建必须通过，并记录部署与后端重启判断。
+
+## 构建与 PM2 运行规则
+
+- 每次代码更新、checkpoint、工作包完成或 Mission 完成后，都分别判断前端构建/静态资源替换和后端构建/PM2 重启是否需要。
+- 后端生产进程仅由 `deploy/pm2/ecosystem.config.cjs` 中的 `wanxiang-agent` 管理；不得用 `nohup`、systemd 或手工后台进程并行启动。
+- 后端源码变化先通过完整测试和构建。只有新二进制已替换 PM2 指向的运行文件后，才执行 `pm2 restart wanxiang-agent`，并验证 PM2 `online` 与 `/api/health`。
+- 仅提交源码时记录需要重启但未重启的原因；仅前端变化时生成并核对 `web/dist`，不重启后端 PM2 应用。

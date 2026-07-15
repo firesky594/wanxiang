@@ -17,6 +17,7 @@
 - 接替 Agent 使用新分支和新 worktree；原 worktree 和未提交修改不得删除、覆盖或共享。
 - checkpoint 和摘要不得包含密钥、令牌、完整模型对话或用户隐私。
 - 平台仓库 Git 提交说明使用中文；项目 checkpoint 提交遵循 `checkpoint(<step-id>): <中文摘要>`。
+- 每次更新均分别判断前端测试与 `web/dist`、后端测试构建与 PM2 重启；生产后端只由 PM2 应用 `wanxiang-agent` 管理。
 
 ---
 
@@ -161,4 +162,5 @@
 - [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m05-bin ./cmd/wanxiang`。
 - [ ] 运行 `npm test && npm run build`，生成并核验 `web/dist`。
 - [ ] 更新 M05 状态、checkpoint、测试证据、风险、前端构建/部署和后端构建/重启判断。
+- [ ] 若部署新后端二进制，执行 `pm2 restart wanxiang-agent` 并验证 PM2 `online` 和 `/api/health`；仅提交源码时明确记录未重启原因。
 - [ ] 使用中文合并提交合并到 `main`，在主分支复核并推送可信 `origin/main`。

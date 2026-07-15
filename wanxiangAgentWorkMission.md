@@ -302,11 +302,16 @@ risks:
   - 当前尚未实现管理员冻结、延期和超时后的安全接管
 frontend_build_required: false
 frontend_build_result: not_required
+frontend_build_reason: 当前 Task 1 至 Task 4 未修改前端源码、依赖、构建配置或已接入的 API 契约
 backend_build_required: true
 backend_build_result: pending_mission_completion
-backend_restart_required: false
+backend_restart_required: true
 backend_restarted: false
-backend_restart_reason: 当前为功能分支中的数据库与类型增量，尚未部署或替换运行中后端
+backend_restart_reason: 当前只提交功能分支源码，尚未构建并替换 PM2 指向的生产二进制，不得重启旧进程
+backend_process_manager: pm2
+backend_pm2_app: wanxiang-agent
+backend_pm2_status: not_checked
+backend_healthcheck_result: not_checked
 next_action: 实现 Task 5 的冻结、延期和新 Agent 安全接管
 ```
 

@@ -97,11 +97,11 @@
 - Produces: `RepairTask(context.Context, int64, RepairDirection, string) (TaskWorkspace, error)`，方向只允许 `database` 或 `git_snapshot`。
 - Produces: `RequestCleanup` 和 `ConfirmCleanup`；非终态必须管理员显式确认。
 
-- [ ] 写失败测试：修改快照、数据库 Agent、分支、HEAD 或 worktree 路径后进入 `drifted`，产生事件且不覆盖任一侧。
-- [ ] 写失败测试：按 `database` 重建快照；按 `git_snapshot` 恢复数据库前重新校验项目、step、Agent、branch 和 scope。
-- [ ] 写失败测试：终态可清理受管 worktree；非终态无确认拒绝；未知目录或分支永不删除。
-- [ ] 实现双向 reconciler、显式修复、审计事件和两阶段清理。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces`，确认通过。
+- [x] 写失败测试：修改快照、数据库 Agent、分支、HEAD 或 worktree 路径后进入 `drifted`，产生事件且不覆盖任一侧。
+- [x] 写失败测试：按 `database` 重建快照；按 `git_snapshot` 恢复数据库前重新校验项目、step、Agent、branch 和 scope。
+- [x] 写失败测试：终态可清理受管 worktree；非终态无确认拒绝；未知目录或分支永不删除。
+- [x] 实现双向 reconciler、显式修复、审计事件和两阶段清理。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces`，确认通过。
 - [ ] 提交：`功能：检测并修复工作区元数据漂移`。
 
 ### Task 5: 自动 Worker、管理员 API 和 Agent ownership

@@ -518,7 +518,7 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ### M08：总管汇总、用户验收和返工
 
-**状态：规格已按主规范复核，实施计划执行中；依赖 M07 已满足**
+**状态：已完成，待合并与生产部署；依赖 M07 已满足**
 
 目标：总管把项目结果转换成用户可验收的交付，并支持返工回到规划阶段。
 
@@ -539,9 +539,9 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ```yaml
 mission: M08
-phase: integration_verification
+phase: completed_pending_deploy
 branch: feat/mission-08
-checkpoint_commit: 0114759
+checkpoint_commit: 3dbfab7
 completed:
   - 已核对 M08 规范、M07 manager 通知和现有任务状态机
   - 已确认采用版本化交付快照方案
@@ -552,6 +552,9 @@ completed:
   - 已实现 manager Provider 返工规划恢复、管理员交付 API 和应用生命周期
   - 已实现高风险事项自动转独立阻塞 Issue，验收不附带授权
   - 已实现 /deliveries 交付证据、决定历史和返工版本页面
+  - 已通过代码审查并修复通知与返工并发 claim、崩溃恢复、最终 main commit 审计关系
+  - 已补齐工作包、审核、用户决定、高风险证据聚合和广义敏感字段脱密
+  - 已将幂等键绑定快照、决定、意见与管理员身份，并防止任务和快照状态分裂
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/db
     result: passed
@@ -561,8 +564,21 @@ tests:
     result: 6 files, 15 tests passed
   - command: npm run build
     result: passed, chunk-size warning retained
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=120s ./...
+    result: all packages passed after review fixes
+  - command: GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m08 ./cmd/wanxiang
+    result: passed
 blockers: []
-next_action: 执行 Go 与 Web 全量验证、密钥扫描和代码审查，修复问题后合并 main
+frontend_build_required: true
+frontend_build_result: passed, 6 files and 15 tests passed
+frontend_dist_path: web/dist
+frontend_deployed: false
+backend_build_required: true
+backend_build_result: passed
+backend_restart_required: true
+backend_restarted: false
+backend_restart_reason: 功能分支尚未合并并替换生产二进制
+next_action: 合并 feat/mission-08 到 main，部署前后端并验证 PM2 与 /api/health
 ```
 
 ### M09：测试、重试、回滚和发布编排

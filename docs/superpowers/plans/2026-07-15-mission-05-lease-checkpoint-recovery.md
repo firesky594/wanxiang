@@ -74,13 +74,13 @@
 - Produces: `GetCheckpoint(context.Context, checkpointID int64) (Checkpoint, error)`。
 - Produces: `CheckpointInput`，包含幂等键、Git 提交、clean、文件、测试、completed、next_action、decisions、blockers、risks 和高风险标记。
 
-- [ ] 写失败测试：clean checkpoint 必须存在于当前 branch，等于 worktree HEAD，并是 provision/base commit 的后代。
-- [ ] 写失败测试：Git branch、HEAD、祖先关系、工作区 clean 声明不一致时拒绝登记。
-- [ ] 写摘要失败测试：要求单项非空 `next_action`，拒绝密钥字段、控制字符、越界路径和超长内容。
-- [ ] 写幂等失败测试：同一 lease 与幂等键只生成一个 checkpoint、一个摘要文件和一个事件。
-- [ ] 写脏现场失败测试：允许 commit 为空、`clean=false` 的上下文型 checkpoint，保留未提交文件且不能作为接管基线。
-- [ ] 实现规范化 YAML 镜像、SHA-256、Git 校验、幂等事务和 `task.step.checkpointed` 事件。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run Checkpoint`。
+- [x] 写失败测试：clean checkpoint 必须存在于当前 branch，等于 worktree HEAD，并是 provision/base commit 的后代。
+- [x] 写失败测试：Git branch、HEAD、祖先关系、工作区 clean 声明不一致时拒绝登记。
+- [x] 写摘要失败测试：要求单项非空 `next_action`，拒绝密钥字段、控制字符、越界路径和超长内容。
+- [x] 写幂等失败测试：同一 lease 与幂等键只生成一个 checkpoint、一个摘要文件和一个事件。
+- [x] 写脏现场失败测试：允许 commit 为空、`clean=false` 的上下文型 checkpoint，保留未提交文件且不能作为接管基线。
+- [x] 实现规范化 YAML 镜像、SHA-256、Git 校验、幂等事务和 `task.step.checkpointed` 事件。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run Checkpoint`。
 - [ ] 提交：`功能：登记 Git 检查点与恢复摘要`。
 
 ### Task 4：过期扫描和原 Agent 恢复

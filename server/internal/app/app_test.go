@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/httpapi"
@@ -34,6 +35,25 @@ func TestNewKeepsMissingKeyManagerBlockedWithoutRuntime(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("manager started without key")
+	}
+}
+
+func TestNewStartsLeaseRecoveryWorkerAndCloseWaits(t *testing.T) {
+	cfg, _ := config.Load(t.TempDir())
+	application, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if application.LeaseRecovery == nil {
+		t.Fatal("lease recovery worker not configured")
+	}
+	select {
+	case <-application.LeaseRecovery.FirstScanDone():
+	case <-time.After(time.Second):
+		t.Fatal("lease recovery startup scan did not finish")
+	}
+	if err := application.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

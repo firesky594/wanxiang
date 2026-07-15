@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { api, cleanupTaskWorkspace, createAdminTask, overrideTaskMatch, repairTaskWorkspace, saveAgentConfig } from './client'
+import { api, cleanupTaskWorkspace, createAdminTask, extendLeaseDeadline, freezeLease, overrideTaskMatch, reassignLease, repairTaskWorkspace, saveAgentConfig, unfreezeLease } from './client'
 import { useAuthStore } from '../stores/auth'
 
 describe('authenticated API client', () => {
@@ -86,5 +86,19 @@ describe('authenticated API client', () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/admin/tasks/12/workspace/repair')
     expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))).toEqual({ direction: 'git_snapshot' })
     expect(JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body))).toEqual({ action: 'request', confirmed: true })
+  })
+
+  it('uses explicit lease recovery administrator requests', async () => {
+    await extendLeaseDeadline(12, 34, 'lease-1', 2, '2026-07-15T12:00:00Z')
+    await freezeLease(12, 34, 'manual review')
+    await unfreezeLease(12, 34)
+    await reassignLease(12, 34, 'worker-b', { checkpoint_id: 56, immediate: true, reason: 'timeout' })
+
+    const calls = vi.mocked(fetch).mock.calls
+    expect(calls[0][0]).toBe('/api/admin/tasks/12/steps/34/lease/extend')
+    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ lease_id: 'lease-1', lease_version: 2, resume_deadline: '2026-07-15T12:00:00Z' })
+    expect(calls[1][0]).toBe('/api/admin/tasks/12/steps/34/lease/freeze')
+    expect(calls[2][0]).toBe('/api/admin/tasks/12/steps/34/lease/unfreeze')
+    expect(JSON.parse(String(calls[3][1]?.body))).toEqual({ new_agent: 'worker-b', checkpoint_id: 56, immediate: true, reason: 'timeout' })
   })
 })

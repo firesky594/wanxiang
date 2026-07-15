@@ -642,7 +642,7 @@ risks:
 
 ### 17.2 前端构建判断
 
-每次完成工作包或 Mission 后，执行者必须检查变更是否涉及以下内容：
+每次代码更新、checkpoint、工作包完成或 Mission 完成后，执行者都必须检查变更是否涉及以下内容：
 
 - `web/src/`、`web/package.json`、`web/package-lock.json`、`web/vite.config.ts`、`web/tsconfig.json` 或前端运行环境配置。
 - Go API 响应结构、字段名、路由或认证方式发生变化，并且 Web 管理台依赖这些接口。
@@ -653,14 +653,18 @@ risks:
 
 ### 17.3 Go 后端构建和重启判断
 
-每次完成工作包或 Mission 后，执行者必须检查变更是否涉及以下内容：
+每次代码更新、checkpoint、工作包完成或 Mission 完成后，执行者都必须检查变更是否涉及以下内容：
 
 - `server/**/*.go`、`server/go.mod`、`server/go.sum`、数据库迁移、后端运行环境或 PM2 配置。
 - 前端依赖的 API 契约发生变化，需要后端新版本才能工作。
 
 命中任一条件时必须先运行 `go test ./...` 和 `go build -o wanxiang ./cmd/wanxiang`。只有测试和构建通过后，才能替换运行中的后端二进制。
 
-若本次工作只提交源码、尚未部署二进制，交接记录写明 `backend_restart_required: true`、`backend_restarted: false` 和未重启原因。若已经把新二进制部署到当前运行目录，则必须通过 PM2 重启 `wanxiang-agent`，随后检查 PM2 状态和 `/api/health`。没有关联 Go 后端时写明 `backend_restart_required: false` 和判断依据。
+生产后端只能由仓库 `deploy/pm2/ecosystem.config.cjs` 定义的 PM2 应用 `wanxiang-agent` 管理。不得使用 `nohup`、手工后台进程或 systemd 同时启动第二份生产后端；开发环境的 `go run` 不得占用生产监听地址。
+
+若本次工作只提交源码、尚未部署二进制，交接记录写明 `backend_restart_required: true`、`backend_restarted: false` 和未重启原因，不得为了“完成重启”而重启仍指向旧二进制的 PM2 进程。若已经把新二进制部署到 PM2 配置指向的运行路径，则必须执行 `pm2 restart wanxiang-agent`，随后执行 `pm2 show wanxiang-agent` 或 `pm2 status` 确认进程为 `online`，并请求 `/api/health` 验证新进程可用。PM2 状态或健康检查失败时不得宣告部署完成。
+
+前端静态资源不由 PM2 管理。前端变更只判断是否需要测试、生成 `web/dist` 和替换线上静态资源；不得因为仅前端更新而重启 `wanxiang-agent`。没有关联 Go 后端时写明 `backend_restart_required: false` 和判断依据。
 
 ### 17.4 Mission 交接字段
 
@@ -678,6 +682,10 @@ backend_build_result: passed
 backend_restart_required: true
 backend_restarted: false
 backend_restart_reason: 尚未替换生产运行目录中的二进制
+backend_process_manager: pm2
+backend_pm2_app: wanxiang-agent
+backend_pm2_status: not_checked
+backend_healthcheck_result: not_checked
 ```
 
 执行者必须按实际情况填写字段，不能复制示例结果。

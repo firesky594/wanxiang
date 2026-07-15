@@ -61,7 +61,7 @@ next_action: 下一项可立即执行的动作
 | 创建或选择 Project | 已实现 | 管理台与后端支持新建或按数据库 ID 复用已有项目，不接受任意客户端路径 |
 | `project.yaml` 和 assignments | 已实现 | 数据库运行状态与 `.wanxiang/` Git 快照双向印证，漂移不静默覆盖 |
 | Agent 独立分支和 worktree | 已实现 | 自动创建独立分支/worktree，登记双提交、范围和状态，支持校验与确认清理 |
-| Agent 任务租约和断点恢复 | 未实现 | 只有 Agent 在线心跳，没有任务级租约、checkpoint 和恢复器 |
+| Agent 任务租约和断点恢复 | 已实现 | 已有任务级租约、心跳、Git checkpoint、短摘要、过期扫描、原 Agent 恢复和安全接管 |
 | 启动执行 Agent | 未实现 | Launcher 只执行 Provider 探测和心跳，不启动 Codex、CLI 或 Agent 进程 |
 | Agent 消费任务并修改代码 | 未实现 | 没有任务队列、命令执行器或项目写入协议 |
 | Token 用量、记忆和日志 | 部分实现 | 有写入接口；没有与任务租约和 scope 绑定 |
@@ -89,7 +89,10 @@ next_action: 下一项可立即执行的动作
   -> 有候选时进入 assigned；无候选时进入 blocked: missing_config
   -> workspace Worker 提交 Git 元数据并创建独立分支和 worktree
   -> 数据库、Git 快照和 worktree 校验一致后进入 workspace_ready
-  -> 当前尚未建立任务租约、checkpoint 或启动执行 Agent
+  -> Agent 领取任务级租约并持续心跳
+  -> checkpoint 同步数据库、Git 提交和短上下文摘要
+  -> 过期后中断，原 Agent 可在期限内恢复，超时后从干净 checkpoint 创建独立接力 worktree
+  -> 当前尚未启动真实执行 Agent
 ```
 
 ## 3. 实施顺序
@@ -269,7 +272,74 @@ next_action: 开始 M05，建立任务租约、Git checkpoint 和上下文摘要
 
 ### M05：任务租约、Git checkpoint 和上下文摘要
 
-**状态：未开始，依赖 M01、M04**
+**状态：已完成，依赖 M01、M04（已满足）**
+
+```yaml
+status: 已完成
+agent: manager
+branch: feat/mission-05
+base_commit: ec90721
+checkpoint_commit: ad8633a
+completed:
+  - Task 1 已增加 task_steps 租约、心跳、checkpoint 和恢复字段的幂等迁移
+  - Task 1 已增加租约、checkpoint、接管历史表及唯一约束和查询索引
+  - Task 1 已增加租约状态、公开视图、系统时钟和可推进 fake clock
+  - Task 2 已实现事务化租约领取、幂等重领和并发单租约约束
+  - Task 2 已实现精确身份与版本心跳续期，以及叠加 workspace scope 的统一 Lease Guard
+  - Task 3 已实现 Git branch、HEAD、祖先关系和工作区 clean 状态校验
+  - Task 3 已实现幂等 checkpoint、SHA-256 摘要、受控镜像文件和 checkpoint 事件
+  - Task 3 已实现短上下文脱敏、长度/控制字符/路径校验及脏现场保留
+  - Task 4 已实现租约过期扫描、幂等中断事件和 5 分钟恢复期限
+  - Task 4 已实现进程启动立即扫描、持久状态重载和原 Agent 同版本恢复
+  - Task 4 已实现 checkpoint、branch、HEAD 与脏文件清单互相印证的恢复校验
+  - Task 5 已实现冻结立即撤权、解冻换发新版本租约和恢复期限延期审计
+  - Task 5 已实现从最近干净 checkpoint 为在线接替 Agent 创建新分支和独立 worktree
+  - Task 5 已保留原 worktree 与脏文件，并在缺少安全基线、分支冲突或 Git 基线无效时阻塞人工审查
+  - Task 6 已接通 Agent 租约领取、心跳、checkpoint、恢复与自身查询 API，并以认证身份覆盖请求体身份
+  - Task 6 已接通 Admin 时间线、延期、冻结、解冻、指定 checkpoint 接管 API 和恢复 Worker 生命周期
+  - Task 6 已在任务详情增加租约剩余时间、attempt、checkpoint、next action 与高风险二次确认操作
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases -run 'Migrate|LeaseTypes'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases ./internal/workspaces
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run Checkpoint
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Interrupt|Resume|Worker'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Freeze|Deadline|Reassign'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
+    result: passed，首次受限沙箱禁止 httptest 本机端口，获准后复跑全量通过
+  - command: GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m05-task5-bin ./cmd/wanxiang
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases ./internal/httpapi ./internal/app
+    result: passed
+  - command: npm test -- --run
+    result: passed，4 个测试文件共 11 项
+  - command: npm run build
+    result: passed，已生成 web/dist；存在非阻塞的大 chunk 警告
+risks:
+  - 前端构建存在非阻塞的大 chunk 警告
+  - 本次只完成源码合并，线上静态资源和 PM2 二进制尚未替换
+frontend_build_required: true
+frontend_build_command: npm test -- --run && npm run build
+frontend_build_result: passed
+frontend_dist_path: web/dist
+frontend_deployed: false
+frontend_deploy_reason: 已验证功能分支构建产物，但尚未替换线上静态资源
+backend_build_required: true
+backend_build_command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m05-task5-bin ./cmd/wanxiang
+backend_build_result: passed
+backend_restart_required: true
+backend_restarted: false
+backend_restart_reason: 当前只提交功能分支源码，尚未构建并替换 PM2 指向的生产二进制，不得重启旧进程
+backend_process_manager: pm2
+backend_pm2_app: wanxiang-agent
+backend_pm2_status: not_checked
+backend_healthcheck_result: not_checked
+next_action: 开始 M06，启动真实 Agent 执行器并强制复用 M05 Lease Guard
+```
 
 目标：实现 `wanxiangAgent.md` 第 14 节规定的完整断点续接协议。
 

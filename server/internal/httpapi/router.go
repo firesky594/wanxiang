@@ -9,6 +9,7 @@ import (
 	"wanxiang-agent/server/internal/assignments"
 	"wanxiang-agent/server/internal/events"
 	"wanxiang-agent/server/internal/issues"
+	"wanxiang-agent/server/internal/leases"
 	"wanxiang-agent/server/internal/mr"
 	"wanxiang-agent/server/internal/tasks"
 	"wanxiang-agent/server/internal/workspaces"
@@ -24,6 +25,7 @@ type Dependencies struct {
 	Issues      *issues.Service
 	Assignments *assignments.Service
 	Workspaces  *workspaces.Service
+	Leases      *leases.Service
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -65,6 +67,14 @@ func NewRouter(deps Dependencies) http.Handler {
 			admin.Post("/api/admin/tasks/{id}/workspace/repair", handleRepairTaskWorkspace(deps.Workspaces))
 			admin.Post("/api/admin/tasks/{id}/workspace/cleanup", handleCleanupTaskWorkspace(deps.Workspaces))
 		}
+		if deps.Leases != nil {
+			admin.Get("/api/admin/tasks/{id}/leases", handleLeaseTimeline(deps.Leases))
+			admin.Post("/api/admin/tasks/{taskID}/steps/{stepID}/lease/extend", handleExtendLease(deps.Leases))
+			admin.Post("/api/admin/tasks/{taskID}/steps/{stepID}/lease/freeze", handleFreezeLease(deps.Leases))
+			admin.Post("/api/admin/tasks/{taskID}/steps/{stepID}/lease/unfreeze", handleUnfreezeLease(deps.Leases))
+			admin.Post("/api/admin/tasks/{taskID}/steps/{stepID}/lease/reassign", handleReassignLease(deps.Leases))
+			admin.Get("/api/admin/checkpoints/{checkpointID}", handleGetCheckpoint(deps.Leases))
+		}
 		if deps.Issues != nil {
 			admin.Post("/api/admin/issues", handleCreateIssue(deps.Issues))
 			admin.Get("/api/admin/issues", handleListIssues(deps.Issues))
@@ -84,6 +94,13 @@ func NewRouter(deps Dependencies) http.Handler {
 		if deps.MR != nil {
 			agent.Post("/api/agent/mr/create", handleCreateMR(deps.MR))
 			agent.Post("/api/agent/mr/{id}/merge", handleManagerMerge(deps.MR))
+		}
+		if deps.Leases != nil {
+			agent.Post("/api/agent/tasks/{taskID}/steps/{stepID}/lease/acquire", handleAcquireLease(deps.Leases))
+			agent.Post("/api/agent/tasks/{taskID}/steps/{stepID}/lease/heartbeat", handleHeartbeatLease(deps.Leases))
+			agent.Post("/api/agent/tasks/{taskID}/steps/{stepID}/lease/checkpoint", handleCreateCheckpoint(deps.Leases))
+			agent.Post("/api/agent/tasks/{taskID}/steps/{stepID}/lease/resume", handleResumeLease(deps.Leases))
+			agent.Get("/api/agent/tasks/{taskID}/steps/{stepID}/lease", handleGetAgentLease(deps.Leases))
 		}
 	})
 	return r

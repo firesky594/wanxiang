@@ -140,10 +140,10 @@
 - Consumes: Task 1 项目复用请求和 Task 5 workspace API。
 - Produces: 创建任务时选择新项目或已有项目；任务详情展示 base commit、分支、worktree 状态、汇报关系和 drift 原因。
 
-- [ ] 写失败前端测试，验证 `project_id` 请求、workspace 查询以及 reconcile/repair/cleanup 请求体。
-- [ ] 修改创建任务表单，默认新建项目，已有项目选项只发送 ID。
-- [ ] 增加 workspace 轨迹区，`drifted` 状态显示修复方向和确认文案，清理操作区分普通申请与强制确认。
-- [ ] 运行 `npm test` 和 `npm run build`，确认测试及 TypeScript 构建通过。
+- [x] 写失败前端测试，验证 `project_id` 请求、workspace 查询以及 reconcile/repair/cleanup 请求体。
+- [x] 修改创建任务表单，默认新建项目，已有项目选项只发送 ID。
+- [x] 增加 workspace 轨迹区，`drifted` 状态显示修复方向和确认文案，清理操作区分普通申请与强制确认。
+- [x] 运行 `npm test` 和 `npm run build`，确认测试及 TypeScript 构建通过。
 - [ ] 提交：`前端：展示并管理隔离工作区`。
 
 ### Task 7: 全量验证、交接和合并

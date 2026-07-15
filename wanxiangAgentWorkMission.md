@@ -224,6 +224,7 @@ completed:
   - 实现显式修复方向、审计记录和确认式安全清理
   - 接通 workspace 自动 provision 与周期漂移校验 Worker
   - 增加管理员 workspace API 和 Agent assignment ownership 校验
+  - 管理台支持按项目 ID 复用项目并展示 workspace 漂移与清理操作
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./...
     result: baseline passed
@@ -237,7 +238,7 @@ backend_build_result: pending
 backend_restart_required: true
 backend_restarted: false
 backend_restart_reason: 尚未替换运行中的后端二进制
-next_action: 在管理台增加已有项目选择和 workspace 轨迹
+next_action: 执行 M04 全量测试、构建、交接和主分支合并
 ```
 
 目标：建立可执行、可审计的项目范围和 Git 隔离环境。

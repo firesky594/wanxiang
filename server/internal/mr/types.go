@@ -6,6 +6,19 @@ import (
 	"strings"
 )
 
+var (
+	ErrIdentityMismatch   = errors.New("identity_mismatch")
+	ErrLeaseInvalid       = errors.New("lease_invalid")
+	ErrCheckpointMismatch = errors.New("checkpoint_mismatch")
+	ErrBranchOwnership    = errors.New("branch_ownership")
+	ErrStateConflict      = errors.New("state_conflict")
+)
+
+type Principal struct {
+	Name string `json:"agent_name"`
+	Role string `json:"role"`
+}
+
 const (
 	MRPendingReview    = "pending_review"
 	MRChangesRequested = "changes_requested"

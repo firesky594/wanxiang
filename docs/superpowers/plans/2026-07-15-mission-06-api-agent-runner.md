@@ -154,4 +154,4 @@
 - [x] 扫描数据库、日志、事件、Git、进程参数和 API 响应，确认不存在测试密钥。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...` 和后端构建。
 - [x] 判断是否关联前端；若增加管理台页面，运行 `npm test -- --run && npm run build`，否则记录 `frontend_build_required: false`。
-- [ ] 更新 M06 状态、测试证据、部署与 PM2 判断，中文合并并推送 `origin/main`。
+- [x] 更新 M06 状态、测试证据、部署与 PM2 判断，中文合并并推送 `origin/main`。

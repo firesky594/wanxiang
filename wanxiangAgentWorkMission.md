@@ -362,10 +362,10 @@ next_action: 开始 M06，启动真实 Agent 执行器并强制复用 M05 Lease 
 
 ### M06：Agent 执行器和任务消费
 
-**状态：代码已合并，待生产部署；依赖 M02 至 M05（已满足）**
+**状态：已完成，依赖 M02 至 M05（已满足）**
 
 ```yaml
-status: 待生产部署
+status: 已完成
 agent: manager
 branch: main
 base_commit: aa2b3b2
@@ -398,6 +398,8 @@ completed:
   - Task 7 真实 Provider 低量验收以 1 次请求完成，input_tokens=161，output_tokens=95
   - Task 7 已扫描工作区、Git 跟踪内容、运行日志、进程参数、数据库审计字段和 API 响应，密钥命中均为 0
   - M06 已以中文合并提交 ac7ac40 推送 origin/main
+  - 已部署生产二进制并由 PM2 重启 wanxiang-agent，新二进制哈希与发布构建一致
+  - 已验证 /api/health 返回 200，Executor 管理路由对未认证请求返回 401
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
@@ -437,21 +439,25 @@ tests:
     result: passed，所有密钥命中为 0；manager 源与测试目标 SHA-256 一致且权限均为 0600
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-final-bin ./cmd/wanxiang
     result: passed
+  - command: install -m 755 /tmp/wanxiang-m06-main-bin server/wanxiang && pm2 restart wanxiang-agent
+    result: passed，生产二进制与发布构建 SHA-256 均为 9699218a88971e1853c9c73c9a92a345ec3f18121ebaef1b6f6bc4817ed84d96
+  - command: curl --noproxy '*' /api/health 与 /api/admin/executor/runs，并检查 PM2 日志
+    result: passed，健康接口 200，Executor 未认证请求 401，PM2 online，日志无启动错误
 risks:
-  - 生产二进制替换与 PM2 重启因需要明确生产操作授权尚未执行
+  - M06 无遗留阻塞；M07 继续完成报告、MR 和审核链路
 frontend_build_required: false
 frontend_build_result: not_required
 frontend_build_reason: M06 只增加后端管理 API，未修改 web 源码或管理台页面
 backend_build_required: true
 backend_build_result: passed
 backend_restart_required: true
-backend_restarted: false
-backend_restart_reason: 新二进制已构建且与当前生产二进制哈希不同；等待用户明确授权替换和重启
+backend_restarted: true
+backend_restart_reason: 已获用户明确授权，备份旧二进制后替换并执行 pm2 restart wanxiang-agent
 backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
-backend_pm2_status: online，当前仍运行旧二进制
-backend_healthcheck_result: passed，使用 curl --noproxy '*' 验证 /api/health 返回 200
-next_action: 用户明确授权后备份并替换 server/wanxiang，重启 PM2 wanxiang-agent，再验证健康检查和执行 API
+backend_pm2_status: online，PID 45059，restarts 2，运行新二进制
+backend_healthcheck_result: passed，/api/health 返回 200；/api/admin/executor/runs 未认证返回预期 401
+next_action: 开始 M07，完成报告、MR 和审核链路
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。

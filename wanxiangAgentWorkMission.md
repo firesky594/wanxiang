@@ -286,6 +286,9 @@ completed:
   - Task 3 已实现 Git branch、HEAD、祖先关系和工作区 clean 状态校验
   - Task 3 已实现幂等 checkpoint、SHA-256 摘要、受控镜像文件和 checkpoint 事件
   - Task 3 已实现短上下文脱敏、长度/控制字符/路径校验及脏现场保留
+  - Task 4 已实现租约过期扫描、幂等中断事件和 5 分钟恢复期限
+  - Task 4 已实现进程启动立即扫描、持久状态重载和原 Agent 同版本恢复
+  - Task 4 已实现 checkpoint、branch、HEAD 与脏文件清单互相印证的恢复校验
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases -run 'Migrate|LeaseTypes'
     result: passed
@@ -293,8 +296,10 @@ tests:
     result: passed
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run Checkpoint
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Interrupt|Resume|Worker'
+    result: passed
 risks:
-  - 当前尚未实现恢复扫描、原 Agent 恢复和安全接管
+  - 当前尚未实现管理员冻结、延期和超时后的安全接管
 frontend_build_required: false
 frontend_build_result: not_required
 backend_build_required: true
@@ -302,7 +307,7 @@ backend_build_result: pending_mission_completion
 backend_restart_required: false
 backend_restarted: false
 backend_restart_reason: 当前为功能分支中的数据库与类型增量，尚未部署或替换运行中后端
-next_action: 实现 Task 4 的过期扫描、服务重启恢复和原 Agent 续接
+next_action: 实现 Task 5 的冻结、延期和新 Agent 安全接管
 ```
 
 目标：实现 `wanxiangAgent.md` 第 14 节规定的完整断点续接协议。

@@ -96,12 +96,12 @@
 - Produces: `Resume(context.Context, LeaseRef) (Lease, error)`。
 - Produces: 周期扫描 Worker，App 重启后立即扫描一次。
 
-- [ ] 写失败测试：fake clock 推进到 60 秒后步骤原子进入 `interrupted`，设置 5 分钟 deadline；重复扫描不重复事件。
-- [ ] 写失败测试：服务重建后从同一 SQLite 读取 lease、checkpoint 和 deadline，不立即重复分配。
-- [ ] 写恢复失败测试：原 Agent 在期限内且 branch、HEAD、worktree、checkpoint 一致时恢复同一 ID/version。
-- [ ] 写恢复失败测试：超过 deadline、出现新 version、Git 漂移或 worktree 现场不一致时保持 interrupted。
-- [ ] 实现扫描、幂等事件、Git 现场校验和原租约恢复。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Interrupt|Resume|Worker'`。
+- [x] 写失败测试：fake clock 推进到 60 秒后步骤原子进入 `interrupted`，设置 5 分钟 deadline；重复扫描不重复事件。
+- [x] 写失败测试：服务重建后从同一 SQLite 读取 lease、checkpoint 和 deadline，不立即重复分配。
+- [x] 写恢复失败测试：原 Agent 在期限内且 branch、HEAD、worktree、checkpoint 一致时恢复同一 ID/version。
+- [x] 写恢复失败测试：超过 deadline、出现新 version、Git 漂移或 worktree 现场不一致时保持 interrupted。
+- [x] 实现扫描、幂等事件、Git 现场校验和原租约恢复。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Interrupt|Resume|Worker'`。
 - [ ] 提交：`功能：扫描中断任务并恢复原租约`。
 
 ### Task 5：冻结、延期和安全接管

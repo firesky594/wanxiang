@@ -108,11 +108,11 @@
 - Produces: `wanxiang agent-worker --input-fd 3`，输入不含 Provider 密钥。
 - Produces: 心跳 goroutine、信号退出 checkpoint 和结构化退出结果。
 
-- [ ] 写失败进程测试：命令参数不含密钥、Agent env 只注入子进程、stdout/stderr 脱密。
-- [ ] 写失败测试：禁止启动 `codex`、`opencode`、shell；Worker 只运行当前二进制的内部模式。
-- [ ] 写失败测试：15 秒心跳、租约冲突退出、关闭信号触发 checkpoint，异常退出不伪造完成。
-- [ ] 实现 fd 输入、Worker 主函数、信号处理和退出协议。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./cmd/wanxiang -run Worker`。
+- [x] 写失败进程测试：命令参数不含密钥、Agent env 只注入子进程、stdout/stderr 脱密。
+- [x] 写失败测试：禁止启动 `codex`、`opencode`、shell；Worker 只运行当前二进制的内部模式。
+- [x] 写失败测试：15 秒心跳、租约冲突退出、关闭信号触发 checkpoint，异常退出不伪造完成。
+- [x] 实现 fd 输入、Worker 主函数、信号处理和退出协议。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./cmd/wanxiang -run Worker`。
 - [ ] 提交：`功能：增加 API Agent 独立 Worker 进程`。
 
 ### Task 6：Supervisor 调度与 App 生命周期

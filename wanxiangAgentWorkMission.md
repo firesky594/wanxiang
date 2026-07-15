@@ -384,6 +384,10 @@ completed:
   - Task 4 已实现 Provider v1 严格 JSON 协议、动作整体校验和三次请求预算
   - Task 4 Runner 固定调用目标 Agent 私有配置，不回退 manager，并累计 Token 用量
   - Task 4 已串接受控 read/write/check/git/checkpoint 工具并写入脱密运行事件和动作哈希
+  - Task 5 已实现当前 wanxiang-agent 二进制的 agent-worker fd 输入模式
+  - Task 5 Worker 只读取进程内目标 Agent 的 AGENT_* 环境，不读取或回退 manager env
+  - Task 5 已实现 15 秒租约心跳、冲突退出、SIGTERM/SIGINT 上下文 checkpoint 和结构化结果
+  - Task 5 子进程命令不含任务、Token 或密钥，且不会启动 Codex、OpenCode 或 shell
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
@@ -405,8 +409,12 @@ tests:
     result: passed
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task4-bin ./cmd/wanxiang
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/executor ./cmd/wanxiang -run Worker
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task5-bin ./cmd/wanxiang
+    result: passed
 risks:
-  - Worker 子进程、Supervisor 与低量真实 Provider 验收仍待实现
+  - Supervisor、App 生命周期集成与低量真实 Provider 验收仍待实现
 frontend_build_required: false
 frontend_build_result: not_required
 frontend_build_reason: 当前只新增后端设计和被 Git 忽略的测试 Agent 配置
@@ -419,7 +427,7 @@ backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 实施 M06 Task 5 的 Worker 子进程模式
+next_action: 实施 M06 Task 6 的 Supervisor 调度与 App 生命周期
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。

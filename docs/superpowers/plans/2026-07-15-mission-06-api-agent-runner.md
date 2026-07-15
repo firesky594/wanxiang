@@ -56,7 +56,7 @@
 - [x] 写脱密失败测试：API key、Bearer token、密码字段和 env 行被替换，普通错误保留且总长度受限。
 - [x] 实现受控读写、大小限制、符号链接检查和脱密。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'ReadFile|WriteFile|Redact'`。
-- [ ] 提交：`功能：实现租约约束的 Agent 文件工具`。
+- [x] 提交：`功能：实现租约约束的 Agent 文件工具`（`d0ba281`）。
 
 ### Task 3：允许列表测试命令与 Git checkpoint
 

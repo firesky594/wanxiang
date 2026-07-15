@@ -292,6 +292,9 @@ completed:
   - Task 5 已实现冻结立即撤权、解冻换发新版本租约和恢复期限延期审计
   - Task 5 已实现从最近干净 checkpoint 为在线接替 Agent 创建新分支和独立 worktree
   - Task 5 已保留原 worktree 与脏文件，并在缺少安全基线、分支冲突或 Git 基线无效时阻塞人工审查
+  - Task 6 已接通 Agent 租约领取、心跳、checkpoint、恢复与自身查询 API，并以认证身份覆盖请求体身份
+  - Task 6 已接通 Admin 时间线、延期、冻结、解冻、指定 checkpoint 接管 API 和恢复 Worker 生命周期
+  - Task 6 已在任务详情增加租约剩余时间、attempt、checkpoint、next action 与高风险二次确认操作
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases -run 'Migrate|LeaseTypes'
     result: passed
@@ -307,11 +310,20 @@ tests:
     result: passed，首次受限沙箱禁止 httptest 本机端口，获准后复跑全量通过
   - command: GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m05-task5-bin ./cmd/wanxiang
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases ./internal/httpapi ./internal/app
+    result: passed
+  - command: npm test -- --run
+    result: passed，4 个测试文件共 11 项
+  - command: npm run build
+    result: passed，已生成 web/dist；存在非阻塞的大 chunk 警告
 risks:
-  - 当前尚未把租约恢复服务接入 Agent/Admin HTTP API、App Worker 生命周期和管理台
-frontend_build_required: false
-frontend_build_result: not_required
-frontend_build_reason: 当前 Task 1 至 Task 4 未修改前端源码、依赖、构建配置或已接入的 API 契约
+  - Mission 合并前仍需全量复核、代码审查，并确认生产静态资源与 PM2 二进制是否部署
+frontend_build_required: true
+frontend_build_command: npm test -- --run && npm run build
+frontend_build_result: passed
+frontend_dist_path: web/dist
+frontend_deployed: false
+frontend_deploy_reason: 已验证功能分支构建产物，但尚未替换线上静态资源
 backend_build_required: true
 backend_build_command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m05-task5-bin ./cmd/wanxiang
 backend_build_result: passed
@@ -322,7 +334,7 @@ backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 实现 Task 6 的 Agent/Admin API、恢复 Worker 生命周期和管理台时间线
+next_action: 执行 Task 7 全量验证、代码审查、交接更新并合并到 main
 ```
 
 目标：实现 `wanxiangAgent.md` 第 14 节规定的完整断点续接协议。

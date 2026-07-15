@@ -151,6 +151,72 @@ export function reconcileTaskWorkspace(taskID: number) { return workspaceAction(
 export function repairTaskWorkspace(taskID: number, direction: 'database'|'git_snapshot') { return workspaceAction(taskID, 'repair', { direction }) }
 export function cleanupTaskWorkspace(taskID: number, action: 'request'|'confirm', confirmed = false) { return workspaceAction(taskID, 'cleanup', { action, confirmed }) }
 
+export interface StepRecovery {
+  step_id: number
+  agent_name: string
+  status: string
+  lease_version: number
+  checkpoint_id?: number
+  attempt: number
+  last_heartbeat_at?: string
+  lease_expires_at?: string
+  resume_deadline?: string
+}
+
+export interface TaskLease {
+  task_id: number
+  step_id: number
+  agent_name: string
+  lease_id: string
+  lease_version: number
+  status: string
+  expires_at: string
+  last_heartbeat_at?: string
+  interrupted_at?: string
+  resume_deadline?: string
+}
+
+export interface TaskCheckpoint {
+  id: number
+  task_id: number
+  step_id: number
+  git_commit: string
+  branch_name: string
+  clean: boolean
+  summary_hash: string
+  high_risk: boolean
+  created_at: string
+  summary: { completed: string[]; next_action: string; files_changed?: string[]; decisions?: string[]; blockers?: string[]; risks?: string[] }
+}
+
+export interface LeaseTimeline {
+  task_id: number
+  steps: StepRecovery[]
+  leases: TaskLease[]
+  checkpoints: TaskCheckpoint[]
+  reassignments: Array<{ id: number; step_id: number; from_agent: string; to_agent: string; checkpoint_id?: number; attempt: number; reason: string; status: string; created_at: string }>
+}
+
+export async function getLeaseTimeline(taskID: number): Promise<LeaseTimeline> {
+  const response = await api<{ ok: boolean; timeline: LeaseTimeline }>(`/api/admin/tasks/${taskID}/leases`)
+  return response.timeline
+}
+
+function leaseAdminAction(taskID: number, stepID: number, action: string, body?: unknown) {
+  return api<{ ok: boolean; lease?: TaskLease }>(`/api/admin/tasks/${taskID}/steps/${stepID}/lease/${action}`, {
+    method: 'POST', body: body === undefined ? undefined : JSON.stringify(body)
+  })
+}
+
+export function extendLeaseDeadline(taskID: number, stepID: number, leaseID: string, leaseVersion: number, resumeDeadline: string) {
+  return leaseAdminAction(taskID, stepID, 'extend', { lease_id: leaseID, lease_version: leaseVersion, resume_deadline: resumeDeadline })
+}
+export function freezeLease(taskID: number, stepID: number, reason: string) { return leaseAdminAction(taskID, stepID, 'freeze', { reason }) }
+export function unfreezeLease(taskID: number, stepID: number) { return leaseAdminAction(taskID, stepID, 'unfreeze') }
+export function reassignLease(taskID: number, stepID: number, newAgent: string, options: { checkpoint_id?: number; immediate?: boolean; reason?: string } = {}) {
+  return leaseAdminAction(taskID, stepID, 'reassign', { new_agent: newAgent, ...options })
+}
+
 export interface MatchRejection {
   name: string
   reasons: string[]

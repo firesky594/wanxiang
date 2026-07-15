@@ -33,6 +33,10 @@ func TestCheckpointValidatesGitAndIsIdempotent(t *testing.T) {
 	if first.ID == 0 || second.ID != first.ID || first.SummaryHash == "" {
 		t.Fatalf("first=%+v second=%+v", first, second)
 	}
+	detail, err := svc.GetCheckpointDetail(t.Context(), first.ID)
+	if err != nil || detail.Summary.NextAction != input.Summary.NextAction || len(detail.Files) != 1 || len(detail.Tests) != 1 {
+		t.Fatalf("checkpoint detail=%+v err=%v", detail, err)
+	}
 	var checkpoints, events int
 	_ = conn.QueryRow(`select count(*) from task_checkpoints where lease_id=?`, lease.LeaseID).Scan(&checkpoints)
 	_ = conn.QueryRow(`select count(*) from runtime_events where task_id=? and event_type='task.step.checkpointed'`, taskID).Scan(&events)

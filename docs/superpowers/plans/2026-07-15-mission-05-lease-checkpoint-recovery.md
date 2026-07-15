@@ -144,12 +144,12 @@
 - Produces Admin API：timeline、extend、freeze、unfreeze、reassign 和历史 checkpoint 查询。
 - Produces 管理台租约剩余时间、心跳、checkpoint、next action、attempt 和高风险确认操作。
 
-- [ ] 写失败 HTTP 测试：Agent 身份覆盖请求体 agent_name，旧 lease 冲突返回 409，越权资源不泄露详情。
-- [ ] 写失败 Admin 测试：延期、冻结、解冻、立即接管和指定 checkpoint 均写 audit log。
-- [ ] 接入恢复 Worker 生命周期，App Close 必须等待 Worker 退出。
-- [ ] 写失败前端 API 测试，验证 lease timeline、extend、freeze、unfreeze 和 reassign 请求体。
-- [ ] 在任务详情 M04 workspace 下增加恢复时间线和二次确认操作，移动端保持单列可用。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/httpapi ./internal/app` 和 `npm test && npm run build`。
+- [x] 写失败 HTTP 测试：Agent 身份覆盖请求体 agent_name，旧 lease 冲突返回 409，越权资源不泄露详情。
+- [x] 写失败 Admin 测试：延期、冻结、解冻、立即接管和指定 checkpoint 均写 audit log。
+- [x] 接入恢复 Worker 生命周期，App Close 必须等待 Worker 退出。
+- [x] 写失败前端 API 测试，验证 lease timeline、extend、freeze、unfreeze 和 reassign 请求体。
+- [x] 在任务详情 M04 workspace 下增加恢复时间线和二次确认操作，移动端保持单列可用。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/httpapi ./internal/app` 和 `npm test && npm run build`。
 - [ ] 提交：`功能：接通租约恢复接口与管理台`。
 
 ### Task 7：全量验证、交接和合并

@@ -200,7 +200,10 @@ func (s *Service) loadSteps(ctx context.Context, taskID int64) ([]step, error) {
 }
 
 func (s *Service) loadCandidates(ctx context.Context) ([]matching.Candidate, error) {
-	rows, err := s.db.QueryContext(ctx, `select name,status from agent_registry order by name`)
+	rows, err := s.db.QueryContext(ctx, `select ar.name,ar.status,count(ta.id)
+		from agent_registry ar
+		left join task_assignments ta on ta.agent_name=ar.name and ta.status in ('assigned','running')
+		group by ar.id,ar.name,ar.status order by ar.name`)
 	if err != nil {
 		return nil, err
 	}
@@ -208,16 +211,13 @@ func (s *Service) loadCandidates(ctx context.Context) ([]matching.Candidate, err
 	result := []matching.Candidate{}
 	for rows.Next() {
 		var name, status string
-		if err := rows.Scan(&name, &status); err != nil {
+		var active int
+		if err := rows.Scan(&name, &status, &active); err != nil {
 			return nil, err
 		}
 		definition, err := matching.LoadDefinition(s.cfg.AgentDir, name)
 		if err != nil {
 			continue
-		}
-		var active int
-		if err := s.db.QueryRowContext(ctx, `select count(*) from task_assignments where agent_name=? and status in ('assigned','running')`, name).Scan(&active); err != nil {
-			return nil, err
 		}
 		result = append(result, matching.Candidate{Definition: definition, Status: status, ActiveTasks: active})
 	}

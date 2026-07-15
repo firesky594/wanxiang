@@ -24,6 +24,12 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`create index if not exists idx_completion_reports_task_step on completion_reports(task_id,step_id,version)`,
 		`create table if not exists manager_notifications (id integer primary key, project_id integer not null, task_id integer not null, mr_id integer not null unique, report_id integer not null, project_lead text not null, main_commit text not null, payload_json text not null, status text not null default 'pending', created_at text not null, consumed_at text)`,
 		`create index if not exists idx_manager_notifications_status on manager_notifications(status,created_at)`,
+		`create table if not exists task_plan_versions (id integer primary key, task_id integer not null, version integer not null, source_snapshot_id integer, source_decision_id integer, status text not null, summary text not null default '', created_at text not null, unique(task_id,version))`,
+		`create table if not exists delivery_snapshots (id integer primary key, task_id integer not null, project_id integer not null, version integer not null, manager_notification_id integer not null unique, main_commit text not null, status text not null, summary text not null, summary_hash text not null, evidence_json text not null, created_by text not null, created_at text not null, unique(task_id,version))`,
+		`create index if not exists idx_delivery_snapshots_task_status on delivery_snapshots(task_id,status,version)`,
+		`create table if not exists acceptance_decisions (id integer primary key, snapshot_id integer not null, task_id integer not null, decision text not null, comment text not null default '', idempotency_key text not null unique, created_by text not null, created_at text not null)`,
+		`create table if not exists rework_rounds (id integer primary key, task_id integer not null, source_snapshot_id integer not null, decision_id integer not null unique, round integer not null, plan_version integer not null, reason text not null, status text not null, checkpoint_json text not null default '{}', last_error text not null default '', created_by text not null, created_at text not null, completed_at text, unique(task_id,round), unique(task_id,plan_version))`,
+		`create index if not exists idx_rework_rounds_status on rework_rounds(status,created_at)`,
 		`create table if not exists issues (id integer primary key, task_id integer, mr_id integer, title text not null, body text not null, status text not null, blocking integer not null default 0, created_by text not null, created_at text not null, closed_at text)`,
 		`create table if not exists runtime_events (id integer primary key, task_id integer, event_type text not null, actor text not null, payload_json text not null, created_at text not null)`,
 		`create table if not exists token_usage (id integer primary key, task_id integer, step_id integer, agent_name text not null, model text not null, input_tokens integer not null, output_tokens integer not null, created_at text not null)`,
@@ -89,6 +95,10 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		{"merge_requests", "approved_at", "text"},
 		{"merge_requests", "merged_by", "text not null default ''"},
 		{"merge_requests", "merge_commit", "text not null default ''"},
+		{"manager_notifications", "last_error", "text not null default ''"},
+		{"manager_notifications", "next_retry_at", "text"},
+		{"task_steps", "plan_version", "integer not null default 1"},
+		{"workflow_edges", "plan_version", "integer not null default 1"},
 	} {
 		if err := ensureColumn(ctx, conn, column.table, column.name, column.definition); err != nil {
 			return err

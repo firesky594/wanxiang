@@ -539,18 +539,21 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ```yaml
 mission: M08
-phase: implementation_plan
-branch: main
-checkpoint_commit: c022c94
+phase: backend_core
+branch: feat/mission-08
+checkpoint_commit: 0114759
 completed:
   - 已核对 M08 规范、M07 manager 通知和现有任务状态机
   - 已确认采用版本化交付快照方案
   - 已编写 M08 书面规格
   - 已按 wanxiangAgent.md 校对角色、权限、高风险确认和恢复边界
   - 已编写 M08 测试驱动实施计划
-tests: []
+  - 已实现计划版本、不可变交付快照、验收决定、返工轮次和通知恢复 Worker
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/db
+    result: passed
 blockers: []
-next_action: 提交实施计划并创建 feat/mission-08 隔离 worktree，运行后端与 Web 基线测试
+next_action: 接入返工规划、管理员交付 API 和应用生命周期
 ```
 
 ### M09：测试、重试、回滚和发布编排

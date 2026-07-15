@@ -61,7 +61,7 @@ next_action: 下一项可立即执行的动作
 | 创建或选择 Project | 已实现 | 管理台与后端支持新建或按数据库 ID 复用已有项目，不接受任意客户端路径 |
 | `project.yaml` 和 assignments | 已实现 | 数据库运行状态与 `.wanxiang/` Git 快照双向印证，漂移不静默覆盖 |
 | Agent 独立分支和 worktree | 已实现 | 自动创建独立分支/worktree，登记双提交、范围和状态，支持校验与确认清理 |
-| Agent 任务租约和断点恢复 | 未实现 | 只有 Agent 在线心跳，没有任务级租约、checkpoint 和恢复器 |
+| Agent 任务租约和断点恢复 | 已实现 | 已有任务级租约、心跳、Git checkpoint、短摘要、过期扫描、原 Agent 恢复和安全接管 |
 | 启动执行 Agent | 未实现 | Launcher 只执行 Provider 探测和心跳，不启动 Codex、CLI 或 Agent 进程 |
 | Agent 消费任务并修改代码 | 未实现 | 没有任务队列、命令执行器或项目写入协议 |
 | Token 用量、记忆和日志 | 部分实现 | 有写入接口；没有与任务租约和 scope 绑定 |
@@ -89,7 +89,10 @@ next_action: 下一项可立即执行的动作
   -> 有候选时进入 assigned；无候选时进入 blocked: missing_config
   -> workspace Worker 提交 Git 元数据并创建独立分支和 worktree
   -> 数据库、Git 快照和 worktree 校验一致后进入 workspace_ready
-  -> 当前尚未建立任务租约、checkpoint 或启动执行 Agent
+  -> Agent 领取任务级租约并持续心跳
+  -> checkpoint 同步数据库、Git 提交和短上下文摘要
+  -> 过期后中断，原 Agent 可在期限内恢复，超时后从干净 checkpoint 创建独立接力 worktree
+  -> 当前尚未启动真实执行 Agent
 ```
 
 ## 3. 实施顺序
@@ -269,14 +272,14 @@ next_action: 开始 M05，建立任务租约、Git checkpoint 和上下文摘要
 
 ### M05：任务租约、Git checkpoint 和上下文摘要
 
-**状态：进行中，依赖 M01、M04（已满足）**
+**状态：已完成，依赖 M01、M04（已满足）**
 
 ```yaml
-status: 进行中
+status: 已完成
 agent: manager
 branch: feat/mission-05
 base_commit: ec90721
-checkpoint_commit: 7764969
+checkpoint_commit: pending_final_document_commit
 completed:
   - Task 1 已增加 task_steps 租约、心跳、checkpoint 和恢复字段的幂等迁移
   - Task 1 已增加租约、checkpoint、接管历史表及唯一约束和查询索引
@@ -317,7 +320,8 @@ tests:
   - command: npm run build
     result: passed，已生成 web/dist；存在非阻塞的大 chunk 警告
 risks:
-  - Mission 合并前仍需全量复核、代码审查，并确认生产静态资源与 PM2 二进制是否部署
+  - 前端构建存在非阻塞的大 chunk 警告
+  - 本次只完成源码合并，线上静态资源和 PM2 二进制尚未替换
 frontend_build_required: true
 frontend_build_command: npm test -- --run && npm run build
 frontend_build_result: passed
@@ -334,7 +338,7 @@ backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 执行 Task 7 全量验证、代码审查、交接更新并合并到 main
+next_action: 开始 M06，启动真实 Agent 执行器并强制复用 M05 Lease Guard
 ```
 
 目标：实现 `wanxiangAgent.md` 第 14 节规定的完整断点续接协议。

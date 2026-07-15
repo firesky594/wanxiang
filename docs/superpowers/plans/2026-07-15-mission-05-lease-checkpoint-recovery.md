@@ -158,9 +158,9 @@
 - Modify: `wanxiangAgentWorkMission.md`
 - Modify: `docs/superpowers/plans/2026-07-15-mission-05-lease-checkpoint-recovery.md`
 
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...`。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m05-bin ./cmd/wanxiang`。
-- [ ] 运行 `npm test && npm run build`，生成并核验 `web/dist`。
-- [ ] 更新 M05 状态、checkpoint、测试证据、风险、前端构建/部署和后端构建/重启判断。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...`。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m05-bin ./cmd/wanxiang`。
+- [x] 运行 `npm test && npm run build`，生成并核验 `web/dist`。
+- [x] 更新 M05 状态、checkpoint、测试证据、风险、前端构建/部署和后端构建/重启判断。
 - [ ] 若部署新后端二进制，执行 `pm2 restart wanxiang-agent` 并验证 PM2 `online` 和 `/api/health`；仅提交源码时明确记录未重启原因。
 - [ ] 使用中文合并提交合并到 `main`，在主分支复核并推送可信 `origin/main`。

@@ -144,7 +144,7 @@
 - [x] 修改创建任务表单，默认新建项目，已有项目选项只发送 ID。
 - [x] 增加 workspace 轨迹区，`drifted` 状态显示修复方向和确认文案，清理操作区分普通申请与强制确认。
 - [x] 运行 `npm test` 和 `npm run build`，确认测试及 TypeScript 构建通过。
-- [ ] 提交：`前端：展示并管理隔离工作区`。
+- [x] 提交：`前端：展示并管理隔离工作区`。
 
 ### Task 7: 全量验证、交接和合并
 
@@ -152,8 +152,8 @@
 - Modify: `wanxiangAgentWorkMission.md`
 - Modify: `docs/superpowers/plans/2026-07-14-mission-04-project-worktrees.md`
 
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./...`，需要本地监听端口时使用已获准的测试权限。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m04-bin ./cmd/wanxiang`。
-- [ ] 运行 `npm test && npm run build`，生成并核验 `web/dist`。
-- [ ] 在 `wanxiangAgentWorkMission.md` 更新链路核对、M04 状态、checkpoint、测试证据、风险、前端构建/部署和后端构建/重启判断。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./...`，需要本地监听端口时使用已获准的测试权限。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m04-bin ./cmd/wanxiang`。
+- [x] 运行 `npm test && npm run build`，生成并核验 `web/dist`。
+- [x] 在 `wanxiangAgentWorkMission.md` 更新链路核对、M04 状态、checkpoint、测试证据、风险、前端构建/部署和后端构建/重启判断。
 - [ ] 使用中文合并提交合并到 `main`，在主分支复核后推送 `origin/main`。

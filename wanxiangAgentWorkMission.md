@@ -362,7 +362,37 @@ next_action: 开始 M06，启动真实 Agent 执行器并强制复用 M05 Lease 
 
 ### M06：Agent 执行器和任务消费
 
-**状态：未开始，依赖 M02 至 M05**
+**状态：进行中，依赖 M02 至 M05（已满足）**
+
+```yaml
+status: 进行中
+agent: manager
+branch: feat/mission-06
+base_commit: aa2b3b2
+checkpoint_commit: cc083a1
+completed:
+  - 已确认使用 Go 多 Worker 子进程，每个 Agent 只用自身 env 调用远程 Provider API
+  - 已禁止本机 Codex、OpenCode、任意 AI CLI 和模型直连 shell
+  - 已建立 m06-smoke 低量测试 Agent，并在不覆盖源文件的前提下复制 manager env，权限均为 0600
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
+    result: passed，M06 隔离 worktree 基线通过
+risks:
+  - 当前只有设计与测试配置，执行器代码尚未实现
+frontend_build_required: false
+frontend_build_result: not_required
+frontend_build_reason: 当前只新增后端设计和被 Git 忽略的测试 Agent 配置
+backend_build_required: false
+backend_build_result: not_required
+backend_restart_required: false
+backend_restarted: false
+backend_restart_reason: 当前未修改后端代码或生产运行文件
+backend_process_manager: pm2
+backend_pm2_app: wanxiang-agent
+backend_pm2_status: not_checked
+backend_healthcheck_result: not_checked
+next_action: 实施 M06 Task 1 的安全 env 引导和执行记录数据结构
+```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。
 

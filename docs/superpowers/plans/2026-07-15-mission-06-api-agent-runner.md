@@ -70,11 +70,11 @@
 - Produces: `RunCheck(context.Context, LeaseRef, CheckRequest) CheckResult`，参数数组直传 `exec.CommandContext`。
 - Produces: `CreateGitCheckpoint(context.Context, LeaseRef, WorkerSummary)`，提交格式 `checkpoint(<step-id>): <中文摘要>` 并登记 M05 checkpoint。
 
-- [ ] 写失败测试：仅运行项目/assignment 允许的命令和参数，拒绝 shell、重定向、管道、部署、删除与超时命令。
-- [ ] 写失败测试：命令 cwd 固定为 Agent worktree，输出脱密并限制长度，租约失效立即拒绝。
-- [ ] 写 Git 测试：只提交受控变更，工作区未知敏感文件时拒绝，不执行 reset/clean。
-- [ ] 实现命令允许列表、超时、输出限制和中文 checkpoint。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'RunCheck|GitCheckpoint'`。
+- [x] 写失败测试：仅运行项目/assignment 允许的命令和参数，拒绝 shell、重定向、管道、部署、删除与超时命令。
+- [x] 写失败测试：命令 cwd 固定为 Agent worktree，输出脱密并限制长度，租约失效立即拒绝。
+- [x] 写 Git 测试：只提交受控变更，工作区未知敏感文件时拒绝，不执行 reset/clean。
+- [x] 实现命令允许列表、超时、输出限制和中文 checkpoint。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'RunCheck|GitCheckpoint'`。
 - [ ] 提交：`功能：增加受控测试命令与 Git 检查点`。
 
 ### Task 4：Provider JSON 动作循环

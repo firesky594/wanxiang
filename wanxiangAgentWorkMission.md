@@ -379,6 +379,8 @@ completed:
   - Task 2 已实现 Lease 与 workspace scope 双重约束的受控文件读写
   - Task 2 已拒绝越界、符号链接、env、Git 元数据、部署目录和平台治理文档
   - Task 2 已实现原子写入、文件大小限制和 API key、Bearer、密码、env 行脱密
+  - Task 3 已实现不经过 shell 的 go/npm/pnpm 检查命令允许列表、超时和脱密输出
+  - Task 3 已实现仅暂存 scope 内文件的中文 Git checkpoint，敏感或越界文件会拒绝
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
@@ -392,8 +394,12 @@ tests:
     result: passed
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task2-bin ./cmd/wanxiang
     result: passed；首次受限沙箱不允许 httptest 回环监听，授权本地测试端口后重跑通过
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'RunCheck|GitCheckpoint'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task3-bin ./cmd/wanxiang
+    result: passed
 risks:
-  - 受控测试命令、Git checkpoint、Provider 动作循环与 Worker 仍待实现
+  - Provider 动作循环、Worker 子进程与 Supervisor 仍待实现
 frontend_build_required: false
 frontend_build_result: not_required
 frontend_build_reason: 当前只新增后端设计和被 Git 忽略的测试 Agent 配置
@@ -406,7 +412,7 @@ backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 实施 M06 Task 3 的允许列表测试命令与 Git checkpoint
+next_action: 实施 M06 Task 4 的 Provider JSON 动作循环
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。

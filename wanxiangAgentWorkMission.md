@@ -281,11 +281,15 @@ completed:
   - Task 1 已增加 task_steps 租约、心跳、checkpoint 和恢复字段的幂等迁移
   - Task 1 已增加租约、checkpoint、接管历史表及唯一约束和查询索引
   - Task 1 已增加租约状态、公开视图、系统时钟和可推进 fake clock
+  - Task 2 已实现事务化租约领取、幂等重领和并发单租约约束
+  - Task 2 已实现精确身份与版本心跳续期，以及叠加 workspace scope 的统一 Lease Guard
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases -run 'Migrate|LeaseTypes'
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases ./internal/workspaces
+    result: passed
 risks:
-  - 当前只完成数据结构；领取、心跳、恢复和接管服务将在后续 Task 实现
+  - 当前尚未实现 checkpoint 登记、恢复扫描和安全接管
 frontend_build_required: false
 frontend_build_result: not_required
 backend_build_required: true
@@ -293,7 +297,7 @@ backend_build_result: pending_mission_completion
 backend_restart_required: false
 backend_restarted: false
 backend_restart_reason: 当前为功能分支中的数据库与类型增量，尚未部署或替换运行中后端
-next_action: 实现 Task 2 的租约领取、心跳和统一 Lease Guard
+next_action: 实现 Task 3 的 Git checkpoint 校验和短上下文摘要
 ```
 
 目标：实现 `wanxiangAgent.md` 第 14 节规定的完整断点续接协议。

@@ -54,12 +54,12 @@
 - Produces: `Authorize(context.Context, LeaseRef, relativePath string) error`，内部复用 `workspaces.Service.AuthorizeAgent`。
 - Produces: `ErrConflict`，HTTP 层映射为 409。
 
-- [ ] 写失败测试：仅 `workspace_ready`、ready workspace 和 assignment owner 可领取；重复领取返回同一 lease。
-- [ ] 写并发失败测试：多个 goroutine 同时领取同一步骤，数据库只有一个 active lease。
-- [ ] 写失败测试：心跳续期 60 秒；错误 Agent、ID、version、step、过期或 frozen lease 返回 `ErrConflict`。
-- [ ] 写失败测试：Lease Guard 拒绝绝对路径、`..`、scope 外路径和非 assignment Agent。
-- [ ] 实现随机 lease ID、事务化领取、条件心跳和统一 Guard。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Acquire|Heartbeat|Authorize'`。
+- [x] 写失败测试：仅 `workspace_ready`、ready workspace 和 assignment owner 可领取；重复领取返回同一 lease。
+- [x] 写并发失败测试：多个 goroutine 同时领取同一步骤，数据库只有一个 active lease。
+- [x] 写失败测试：心跳续期 60 秒；错误 Agent、ID、version、step、过期或 frozen lease 返回 `ErrConflict`。
+- [x] 写失败测试：Lease Guard 拒绝绝对路径、`..`、scope 外路径和非 assignment Agent。
+- [x] 实现随机 lease ID、事务化领取、条件心跳和统一 Guard。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Acquire|Heartbeat|Authorize'`。
 - [ ] 提交：`功能：实现任务租约领取与心跳校验`。
 
 ### Task 3：Git Checkpoint 和上下文摘要

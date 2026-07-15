@@ -39,7 +39,7 @@
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/db ./internal/leases -run 'Migrate|LeaseTypes'`，确认失败。
 - [x] 实现幂等补列迁移、历史表、必要索引、系统时钟和 fake clock。
 - [x] 重跑定向测试确认通过。
-- [ ] 提交：`数据库：增加任务租约与检查点结构`。
+- [x] 提交：`数据库：增加任务租约与检查点结构`（`91c8c49`）。
 
 ### Task 2：领取、心跳和统一 Lease Guard
 

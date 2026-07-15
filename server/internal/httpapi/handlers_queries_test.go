@@ -80,6 +80,43 @@ func TestAdminQueryReturnsWorkflowCollections(t *testing.T) {
 	}
 }
 
+func TestAdminMRListAndDetailReturnReportAndReviews(t *testing.T) {
+	cfg, _ := config.Load(t.TempDir())
+	db := testutil.OpenDB(t)
+	bus := events.NewBus(db)
+	svc := mr.NewService(cfg, db, bus, nil)
+	project, _ := db.Exec(`insert into projects(slug,dir,status,remote_url,created_at) values('mr-query','/tmp/mr-query','created','','now')`)
+	projectID, _ := project.LastInsertId()
+	taskRow, _ := db.Exec(`insert into tasks(project_id,title,description,status,created_at) values(?,'mr','mr','workspace_ready','now')`, projectID)
+	taskID, _ := taskRow.LastInsertId()
+	report, err := db.Exec(`insert into completion_reports(project_id,task_id,step_id,lease_id,lease_version,agent_name,agent_role,version,source_branch,checkpoint_commit,head_commit,completed_json,incomplete_json,key_files_json,tests_json,risks_json,dependencies_json,merge_order_json,user_decision,created_at) values(?,?,1,'lease',1,'worker','worker',1,'agent/worker/mr','abc','abc','["完成 API"]','[]','["server/api.go"]','[{"command":"go test ./...","status":"passed"}]','["需要发布"]','[]','[]','','now')`, projectID, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportID, _ := report.LastInsertId()
+	mrRow, err := db.Exec(`insert into merge_requests(project_id,task_id,step_id,report_id,lease_id,report_version,title,source_branch,target_branch,source_commit,project_lead,status,created_by,created_at) values(?,?,1,?,'lease',1,'完成 API','agent/worker/mr','main','abc','lead','approved','worker','now')`, projectID, taskID, reportID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mrID, _ := mrRow.LastInsertId()
+	_, _ = db.Exec(`insert into mr_reviews(mr_id,reviewer,role,status,body,created_at) values(?,'lead','project_lead','approved','检查通过','now')`, mrID)
+	adminRouter := NewRouter(Dependencies{DB: db, MR: svc})
+	seedAdmin(t, db, "admin2", "secret123")
+	login := adminRequest(adminRouter, "", http.MethodPost, "/api/admin/login", `{"username":"admin2","password":"secret123"}`)
+	var session struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(login.Body.Bytes(), &session)
+	list := adminRequest(adminRouter, session.Token, http.MethodGet, "/api/admin/mrs", "")
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "完成 API") || !strings.Contains(list.Body.String(), "完成 API") {
+		t.Fatalf("list=%d %s", list.Code, list.Body.String())
+	}
+	detail := adminRequest(adminRouter, session.Token, http.MethodGet, "/api/admin/mrs/"+itoa(mrID), "")
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), "检查通过") || !strings.Contains(detail.Body.String(), "go test ./...") {
+		t.Fatalf("detail=%d %s", detail.Code, detail.Body.String())
+	}
+}
+
 func queryFixture(t *testing.T) (http.Handler, string, tasks.Task) {
 	t.Helper()
 	cfg, _ := config.Load(t.TempDir())

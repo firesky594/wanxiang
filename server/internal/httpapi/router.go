@@ -89,6 +89,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 		if deps.MR != nil {
 			admin.Get("/api/admin/mrs", handleListMRs(deps.MR))
+			admin.Get("/api/admin/mrs/{id}", handleGetMR(deps.MR))
 		}
 	})
 	r.Group(func(agent chi.Router) {

@@ -33,6 +33,11 @@ func (s *Service) AdminList(ctx context.Context, taskID *int64, limit, offset in
 	return result, nil
 }
 
+func (s *Service) AdminDetail(ctx context.Context, mrID int64) (MRDetail, error) {
+	detail, _, err := s.loadDetail(ctx, mrID)
+	return detail, err
+}
+
 func (s *Service) loadDetail(ctx context.Context, mrID int64) (MRDetail, string, error) {
 	var detail MRDetail
 	var createdBy string

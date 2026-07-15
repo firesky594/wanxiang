@@ -94,7 +94,7 @@
 - [x] 写动作循环测试：read/write/check/checkpoint 顺序执行，每一步重新校验 lease；401、429、5xx、超时和非法 JSON 得到确定状态。
 - [x] 实现安全 prompt、JSON 协议、请求预算、Token 记账、有限重试和脱密事件。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'Protocol|Runner'`。
-- [ ] 提交：`功能：实现 Agent Provider API 动作循环`。
+- [x] 提交：`功能：实现 Agent Provider API 动作循环`（`29d4fed`）。
 
 ### Task 5：Worker 子进程模式
 

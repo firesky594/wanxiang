@@ -369,7 +369,7 @@ status: 进行中
 agent: manager
 branch: feat/mission-06
 base_commit: aa2b3b2
-checkpoint_commit: f4c0005
+checkpoint_commit: 29d4fed
 completed:
   - 已确认使用 Go 多 Worker 子进程，每个 Agent 只用自身 env 调用远程 Provider API
   - 已禁止本机 Codex、OpenCode、任意 AI CLI 和模型直连 shell

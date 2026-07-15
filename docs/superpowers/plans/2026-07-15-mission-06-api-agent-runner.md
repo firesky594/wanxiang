@@ -37,7 +37,7 @@
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./internal/db -run 'CopyTestEnv|ExecutorMigration'` 确认失败。
 - [x] 实现安全复制、执行类型、迁移和索引。
 - [x] 重跑定向测试确认通过。
-- [ ] 提交：`数据库：增加 Agent 执行记录与测试配置引导`。
+- [x] 提交：`数据库：增加 Agent 执行记录与测试配置引导`（`c00cac5`）。
 
 ### Task 2：受控文件工具与 Lease Guard
 

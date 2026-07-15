@@ -518,7 +518,7 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ### M08：总管汇总、用户验收和返工
 
-**状态：设计已确认，书面规格待复核；依赖 M07 已满足**
+**状态：规格已按主规范复核，实施计划执行中；依赖 M07 已满足**
 
 目标：总管把项目结果转换成用户可验收的交付，并支持返工回到规划阶段。
 
@@ -539,16 +539,18 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ```yaml
 mission: M08
-phase: design_review
+phase: implementation_plan
 branch: main
-checkpoint_commit: d3593d4
+checkpoint_commit: c022c94
 completed:
   - 已核对 M08 规范、M07 manager 通知和现有任务状态机
   - 已确认采用版本化交付快照方案
   - 已编写 M08 书面规格
+  - 已按 wanxiangAgent.md 校对角色、权限、高风险确认和恢复边界
+  - 已编写 M08 测试驱动实施计划
 tests: []
 blockers: []
-next_action: 用户复核书面规格后，编写 M08 实施计划并创建 feat/mission-08 隔离 worktree
+next_action: 提交实施计划并创建 feat/mission-08 隔离 worktree，运行后端与 Web 基线测试
 ```
 
 ### M09：测试、重试、回滚和发布编排

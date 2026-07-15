@@ -127,12 +127,12 @@
 - Produces: `Supervisor.Start()`、`Supervisor.Close()`、`Scan(context.Context)`。
 - Consumes: M03 assignment、M04 ready workspace、M05 acquire/recovery 和 Agent `max_concurrency`。
 
-- [ ] 写失败调度测试：只消费依赖完成且 workspace ready 的步骤；同一步骤不重复启动。
-- [ ] 写并发测试：按 Agent `max_concurrency` 和全局限制启动独立进程；低量模式全局并发固定为 1。
-- [ ] 写重启测试：从 `executor_runs` 和租约恢复，不为同一有效 lease 重复启动。
-- [ ] 写关闭测试：停止领取、通知 Worker、等待退出；超时后终止并由 M05 中断。
-- [ ] 实现扫描、PID/退出状态、事件、App Start/Close 集成。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./internal/app -run 'Supervisor|Executor'`。
+- [x] 写失败调度测试：只消费依赖完成且 workspace ready 的步骤；同一步骤不重复启动。
+- [x] 写并发测试：按 Agent `max_concurrency` 和全局限制启动独立进程；低量模式全局并发固定为 1。
+- [x] 写重启测试：从 `executor_runs` 和租约恢复，不为同一有效 lease 重复启动。
+- [x] 写关闭测试：停止领取、通知 Worker、等待退出；超时后终止并由 M05 中断。
+- [x] 实现扫描、PID/退出状态、事件、App Start/Close 集成。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./internal/app -run 'Supervisor|Executor'`。
 - [ ] 提交：`功能：监管 Agent 并行任务消费`。
 
 ### Task 7：管理 API、低量真实 API 验收与交接

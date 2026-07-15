@@ -388,6 +388,11 @@ completed:
   - Task 5 Worker 只读取进程内目标 Agent 的 AGENT_* 环境，不读取或回退 manager env
   - Task 5 已实现 15 秒租约心跳、冲突退出、SIGTERM/SIGINT 上下文 checkpoint 和结构化结果
   - Task 5 子进程命令不含任务、Token 或密钥，且不会启动 Codex、OpenCode 或 shell
+  - Task 6 Supervisor 只领取依赖完成、assignment/workspace ready 的步骤，并通过 M05 Acquire 建立唯一租约
+  - Task 6 已实现 Agent max_concurrency、全局低量并发 1、并发扫描互斥和有效租约重启去重
+  - Task 6 只读取目标 Agent 0600 env；缺失时写 blocked: missing_config，绝不读取 manager env
+  - Task 6 已记录 Worker PID/退出状态，App 关闭时停止领取、SIGTERM 等待并在超时后 Kill
+  - Task 6 已集成 App Start/Close；PM2 仍只管理 wanxiang-agent 主进程
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
@@ -413,8 +418,12 @@ tests:
     result: passed
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task5-bin ./cmd/wanxiang
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/executor ./internal/app -run 'Supervisor|Executor'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task6-bin ./cmd/wanxiang
+    result: passed
 risks:
-  - Supervisor、App 生命周期集成与低量真实 Provider 验收仍待实现
+  - 管理 API、脱密运行时间线与低量真实 Provider 验收仍待实现
 frontend_build_required: false
 frontend_build_result: not_required
 frontend_build_reason: 当前只新增后端设计和被 Git 忽略的测试 Agent 配置
@@ -427,7 +436,7 @@ backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 实施 M06 Task 6 的 Supervisor 调度与 App 生命周期
+next_action: 实施 M06 Task 7 的管理 API、低量真实 Provider 验收与交接
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。

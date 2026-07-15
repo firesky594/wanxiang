@@ -133,17 +133,33 @@ type ManagerNotification struct {
 	Status      string `json:"status"`
 }
 
+type MRReview struct {
+	ID        int64  `json:"id"`
+	MRID      int64  `json:"mr_id"`
+	Reviewer  string `json:"reviewer"`
+	Role      string `json:"role"`
+	Status    string `json:"status"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+}
+
 type MRDetail struct {
 	MergeRequest MergeRequest     `json:"merge_request"`
 	Report       CompletionReport `json:"report"`
+	Reviews      []MRReview       `json:"reviews"`
 }
 
 type MergeRequest struct {
-	ID           int64  `json:"id"`
-	ProjectID    int64  `json:"project_id"`
-	TaskID       int64  `json:"task_id"`
-	Title        string `json:"title"`
-	SourceBranch string `json:"source_branch"`
-	TargetBranch string `json:"target_branch"`
-	Status       string `json:"status"`
+	ID            int64  `json:"id"`
+	ProjectID     int64  `json:"project_id"`
+	TaskID        int64  `json:"task_id"`
+	Title         string `json:"title"`
+	SourceBranch  string `json:"source_branch"`
+	TargetBranch  string `json:"target_branch"`
+	Status        string `json:"status"`
+	ReportID      int64  `json:"report_id"`
+	StepID        int64  `json:"step_id"`
+	ReportVersion int64  `json:"report_version"`
+	SourceCommit  string `json:"source_commit"`
+	ProjectLead   string `json:"project_lead"`
 }

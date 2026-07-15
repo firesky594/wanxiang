@@ -147,11 +147,11 @@
 **Interfaces:**
 - Produces: Admin 执行时间线、启动/停止低量测试和运行详情接口；不返回密钥或完整 Provider 对话。
 
-- [ ] 写失败 HTTP 测试：管理员可查看脱密运行状态；Agent 和未认证请求不能启动测试或读取其他运行详情。
-- [ ] 使用 `CopyTestEnv` 将 manager env 复制到已创建的 `m06-smoke`，验证 `0600`、不覆盖和 manager 源哈希不变。
-- [ ] 运行一次单 Agent、单工作包、最多 3 请求的真实 Provider API 低量测试；记录 token 数和脱密结果，不记录内容或密钥。
-- [ ] 杀死测试 Worker，验证 M05 中断；重启 Supervisor，验证不重复启动有效租约。
-- [ ] 扫描数据库、日志、事件、Git、进程参数和 API 响应，确认不存在测试密钥。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...` 和后端构建。
-- [ ] 判断是否关联前端；若增加管理台页面，运行 `npm test -- --run && npm run build`，否则记录 `frontend_build_required: false`。
+- [x] 写失败 HTTP 测试：管理员可查看脱密运行状态；Agent 和未认证请求不能启动测试或读取其他运行详情。
+- [x] 使用 `CopyTestEnv` 将 manager env 复制到已创建的 `m06-smoke`，验证 `0600`、不覆盖和 manager 源哈希不变。
+- [x] 运行一次单 Agent、单工作包、最多 3 请求的真实 Provider API 低量测试；记录 token 数和脱密结果，不记录内容或密钥。
+- [x] 杀死测试 Worker，验证 M05 中断；重启 Supervisor，验证不重复启动有效租约。
+- [x] 扫描数据库、日志、事件、Git、进程参数和 API 响应，确认不存在测试密钥。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...` 和后端构建。
+- [x] 判断是否关联前端；若增加管理台页面，运行 `npm test -- --run && npm run build`，否则记录 `frontend_build_required: false`。
 - [ ] 更新 M06 状态、测试证据、部署与 PM2 判断，中文合并并推送 `origin/main`。

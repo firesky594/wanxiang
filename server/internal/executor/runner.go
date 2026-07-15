@@ -41,7 +41,7 @@ func (r *Runner) Run(ctx context.Context, input WorkerInput) (WorkerResult, erro
 		result.Status = RunFailed
 		return result, err
 	}
-	messages := []providers.Message{{Role: "system", Content: "你是受控执行 Agent。只返回协议版本 1 的 JSON，不得输出密钥，不得请求 shell、部署或越界路径。"}, {Role: "user", Content: r.workPrompt(ctx, input)}}
+	messages := []providers.Message{{Role: "system", Content: `你是受控执行 Agent。响应必须是单个裸 JSON 对象，不得使用 Markdown，不得省略字段。固定结构：{"version":1,"status":"continue|checkpoint|completed|blocked","summary":"非空字符串","actions":[],"next_action":"非空字符串"}。status 必须从列出的四个值中选择一个；actions 即使为空也必须提供。不得输出密钥，不得请求 shell、部署或越界路径。`}, {Role: "user", Content: r.workPrompt(ctx, input)}}
 	sequence := 0
 	for request := 1; request <= maxProviderRequests; request++ {
 		chatResult, chatErr := r.chat.ChatAgent(ctx, input.AgentName, messages, 2048)

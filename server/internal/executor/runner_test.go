@@ -15,11 +15,13 @@ type fakeChatter struct {
 	responses []providers.Result
 	err       error
 	names     []string
+	messages  [][]providers.Message
 	calls     int
 }
 
-func (f *fakeChatter) ChatAgent(_ context.Context, name string, _ []providers.Message, _ int) (providers.Result, error) {
+func (f *fakeChatter) ChatAgent(_ context.Context, name string, messages []providers.Message, _ int) (providers.Result, error) {
 	f.names = append(f.names, name)
+	f.messages = append(f.messages, messages)
 	f.calls++
 	if f.err != nil {
 		return providers.Result{}, f.err
@@ -66,6 +68,9 @@ func TestRunnerUsesTargetAgentAndStopsAtThreeRequests(t *testing.T) {
 		if name != "agent-a" {
 			t.Fatalf("fallback agent=%q", name)
 		}
+	}
+	if len(chat.messages) == 0 || !strings.Contains(chat.messages[0][0].Content, `{"version":1,"status":"continue|checkpoint|completed|blocked"`) {
+		t.Fatal("system prompt lacks exact protocol contract")
 	}
 }
 

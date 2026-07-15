@@ -223,6 +223,19 @@ func (s *Supervisor) Close() {
 		}
 	})
 }
+func (s *Supervisor) StopRun(ctx context.Context, runID int64) error {
+	var stepID int64
+	if err := s.db.QueryRowContext(ctx, `select step_id from executor_runs where id=?`, runID).Scan(&stepID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	worker, ok := s.active[stepID]
+	s.mu.Unlock()
+	if !ok {
+		return ErrRunNotActive
+	}
+	return worker.process.Signal()
+}
 func (s *Supervisor) blockMissingConfig(ctx context.Context, agent string) {
 	_, _ = s.db.ExecContext(ctx, `update agent_registry set status='blocked: missing_config',last_heartbeat=? where name=?`, time.Now().UTC().Format(time.RFC3339Nano), agent)
 }

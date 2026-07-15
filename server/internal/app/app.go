@@ -79,7 +79,7 @@ func New(cfg config.Config) (*App, error) {
 		Workspaces:    workspaceWorker,
 		LeaseRecovery: leaseWorker,
 		Executor:      executorSupervisor,
-		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc},
+		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc, Executor: executor.NewAdminService(conn, executorSupervisor)},
 	}, nil
 }
 

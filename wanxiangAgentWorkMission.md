@@ -393,6 +393,10 @@ completed:
   - Task 6 只读取目标 Agent 0600 env；缺失时写 blocked: missing_config，绝不读取 manager env
   - Task 6 已记录 Worker PID/退出状态，App 关闭时停止领取、SIGTERM 等待并在超时后 Kill
   - Task 6 已集成 App Start/Close；PM2 仍只管理 wanxiang-agent 主进程
+  - Task 7 已增加管理员执行列表、运行详情、低量扫描启动和停止 Worker API
+  - Task 7 已验证管理员鉴权；匿名与 Agent Token 均不能访问管理执行接口
+  - Task 7 真实 Provider 低量验收以 1 次请求完成，input_tokens=161，output_tokens=95
+  - Task 7 已扫描工作区、Git 跟踪内容、运行日志、进程参数、数据库审计字段和 API 响应，密钥命中均为 0
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
@@ -422,11 +426,21 @@ tests:
     result: passed
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task6-bin ./cmd/wanxiang
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/httpapi ./internal/executor -run Executor
+    result: passed
+  - command: WANXIANG_LIVE_SMOKE=1 WANXIANG_LIVE_AGENT_ENV=agents/m06-smoke/env go test -count=1 -timeout=60s ./internal/executor -run LiveProviderLowVolumeRunner -v
+    result: passed，status=completed，requests=1，input_tokens=161，output_tokens=95；未记录响应内容
+  - command: go test ./internal/leases ./internal/executor -run 'InterruptExpiredIsIdempotentAndSurvivesServiceRestart|SupervisorWaitsForDependenciesAndSkipsExistingLease|WorkerHeartbeatConflictStopsAndSignalCheckpoints'
+    result: passed，验证 Worker 中断、M05 恢复扫描和有效租约不重复启动
+  - command: 脱密扫描 worktree、Git、process、runtime logs、数据库和 API 响应
+    result: passed，所有密钥命中为 0；manager 源与测试目标 SHA-256 一致且权限均为 0600
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-final-bin ./cmd/wanxiang
+    result: passed
 risks:
-  - 管理 API、脱密运行时间线与低量真实 Provider 验收仍待实现
+  - 功能分支尚待合并 main、替换生产二进制并完成 PM2 和健康检查
 frontend_build_required: false
 frontend_build_result: not_required
-frontend_build_reason: 当前只新增后端设计和被 Git 忽略的测试 Agent 配置
+frontend_build_reason: M06 只增加后端管理 API，未修改 web 源码或管理台页面
 backend_build_required: true
 backend_build_result: passed
 backend_restart_required: true
@@ -436,7 +450,7 @@ backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 实施 M06 Task 7 的管理 API、低量真实 Provider 验收与交接
+next_action: 中文提交 Task 7，合并并推送 origin/main，部署后端并验证 PM2 与健康检查
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。

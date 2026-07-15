@@ -21,11 +21,52 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 		"token_usage", "remote_sync_jobs", "audit_logs",
 		"agent_match_decisions", "task_assignments", "team_decisions", "project_workspaces",
 		"task_step_leases", "task_checkpoints", "step_reassignments",
+		"executor_runs", "executor_actions",
 	} {
 		var name string
 		err := conn.QueryRow(`select name from sqlite_master where type='table' and name=?`, table).Scan(&name)
 		if err != nil {
 			t.Fatalf("table %s not created: %v", table, err)
+		}
+	}
+}
+
+func TestExecutorMigrationIsIdempotentAndConstrained(t *testing.T) {
+	conn, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for i := 0; i < 2; i++ {
+		if err := Migrate(context.Background(), conn); err != nil {
+			t.Fatalf("Migrate pass %d: %v", i+1, err)
+		}
+	}
+	now := "2026-07-15T00:00:00Z"
+	insertRun := `insert into executor_runs(task_id,step_id,agent_name,lease_id,lease_version,status,request_count,input_tokens,output_tokens,created_at,updated_at) values(1,2,'worker',?,1,'starting',0,0,0,?,?)`
+	if _, err := conn.Exec(insertRun, "lease-1", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(insertRun, "lease-1", now, now); err == nil {
+		t.Fatal("duplicate lease run was accepted")
+	}
+	insertAction := `insert into executor_actions(run_id,sequence,action_type,relative_path,status,result_summary,result_hash,created_at) values(1,1,'read_file','README.md','passed','ok','hash',?)`
+	if _, err := conn.Exec(insertAction, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(insertAction, now); err == nil {
+		t.Fatal("duplicate action sequence was accepted")
+	}
+	for table, forbidden := range map[string][]string{
+		"executor_runs":    {"api_key", "provider_request", "provider_response", "prompt", "secret"},
+		"executor_actions": {"file_content", "command_output", "provider_response", "secret"},
+	} {
+		for _, column := range forbidden {
+			var count int
+			query := `select count(*) from pragma_table_info('` + table + `') where name=?`
+			if err := conn.QueryRow(query, column).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("forbidden column %s.%s count=%d err=%v", table, column, count, err)
+			}
 		}
 	}
 }

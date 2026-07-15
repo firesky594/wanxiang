@@ -57,6 +57,25 @@ func TestNewStartsLeaseRecoveryWorkerAndCloseWaits(t *testing.T) {
 	}
 }
 
+func TestNewStartsExecutorSupervisorAndCloseWaits(t *testing.T) {
+	cfg, _ := config.Load(t.TempDir())
+	application, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if application.Executor == nil {
+		t.Fatal("executor supervisor not configured")
+	}
+	select {
+	case <-application.Executor.FirstScanDone():
+	case <-time.After(time.Second):
+		t.Fatal("executor startup scan did not finish")
+	}
+	if err := application.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNewStartsManagerRuntimeWhenKeyExistsAndAppCloses(t *testing.T) {
 	provider := successfulProviderServer(t)
 	defer provider.Close()

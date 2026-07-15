@@ -12,6 +12,7 @@ import (
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/db"
 	"wanxiang-agent/server/internal/events"
+	"wanxiang-agent/server/internal/executor"
 	"wanxiang-agent/server/internal/httpapi"
 	"wanxiang-agent/server/internal/issues"
 	"wanxiang-agent/server/internal/leases"
@@ -29,6 +30,7 @@ type App struct {
 	Assignments   *assignments.Worker
 	Workspaces    *workspaces.Worker
 	LeaseRecovery *leases.Worker
+	Executor      *executor.Supervisor
 	HTTP          httpapi.Dependencies
 }
 
@@ -66,6 +68,8 @@ func New(cfg config.Config) (*App, error) {
 	leaseSvc := leases.NewService(conn, leases.SystemClock{}, workspaceSvc)
 	leaseWorker := leases.NewWorker(leaseSvc, leases.HeartbeatInterval)
 	leaseWorker.Start()
+	executorSupervisor := executor.NewSupervisor(cfg, conn, leaseSvc, nil, executor.SupervisorOptions{GlobalLimit: 1})
+	executorSupervisor.Start()
 	return &App{
 		Config:        cfg,
 		DB:            conn,
@@ -74,11 +78,15 @@ func New(cfg config.Config) (*App, error) {
 		Assignments:   assignmentWorker,
 		Workspaces:    workspaceWorker,
 		LeaseRecovery: leaseWorker,
-		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc},
+		Executor:      executorSupervisor,
+		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc, Executor: executor.NewAdminService(conn, executorSupervisor)},
 	}, nil
 }
 
 func (a *App) Close() error {
+	if a.Executor != nil {
+		a.Executor.Close()
+	}
 	if a.LeaseRecovery != nil {
 		a.LeaseRecovery.Close()
 	}

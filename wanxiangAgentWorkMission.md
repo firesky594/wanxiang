@@ -362,16 +362,105 @@ next_action: 开始 M06，启动真实 Agent 执行器并强制复用 M05 Lease 
 
 ### M06：Agent 执行器和任务消费
 
-**状态：未开始，依赖 M02 至 M05**
+**状态：进行中，依赖 M02 至 M05（已满足）**
+
+```yaml
+status: 进行中
+agent: manager
+branch: feat/mission-06
+base_commit: aa2b3b2
+checkpoint_commit: 9175ff6
+completed:
+  - 已确认使用 Go 多 Worker 子进程，每个 Agent 只用自身 env 调用远程 Provider API
+  - 已禁止本机 Codex、OpenCode、任意 AI CLI 和模型直连 shell
+  - 已建立 m06-smoke 低量测试 Agent，并在不覆盖源文件的前提下复制 manager env，权限均为 0600
+  - Task 1 已实现不覆盖、拒绝符号链接且固定 0600 的测试 env 引导
+  - Task 1 已增加 executor_runs、executor_actions、唯一约束和无秘密执行协议类型
+  - Task 2 已实现 Lease 与 workspace scope 双重约束的受控文件读写
+  - Task 2 已拒绝越界、符号链接、env、Git 元数据、部署目录和平台治理文档
+  - Task 2 已实现原子写入、文件大小限制和 API key、Bearer、密码、env 行脱密
+  - Task 3 已实现不经过 shell 的 go/npm/pnpm 检查命令允许列表、超时和脱密输出
+  - Task 3 已实现仅暂存 scope 内文件的中文 Git checkpoint，敏感或越界文件会拒绝
+  - Task 4 已实现 Provider v1 严格 JSON 协议、动作整体校验和三次请求预算
+  - Task 4 Runner 固定调用目标 Agent 私有配置，不回退 manager，并累计 Token 用量
+  - Task 4 已串接受控 read/write/check/git/checkpoint 工具并写入脱密运行事件和动作哈希
+  - Task 5 已实现当前 wanxiang-agent 二进制的 agent-worker fd 输入模式
+  - Task 5 Worker 只读取进程内目标 Agent 的 AGENT_* 环境，不读取或回退 manager env
+  - Task 5 已实现 15 秒租约心跳、冲突退出、SIGTERM/SIGINT 上下文 checkpoint 和结构化结果
+  - Task 5 子进程命令不含任务、Token 或密钥，且不会启动 Codex、OpenCode 或 shell
+  - Task 6 Supervisor 只领取依赖完成、assignment/workspace ready 的步骤，并通过 M05 Acquire 建立唯一租约
+  - Task 6 已实现 Agent max_concurrency、全局低量并发 1、并发扫描互斥和有效租约重启去重
+  - Task 6 只读取目标 Agent 0600 env；缺失时写 blocked: missing_config，绝不读取 manager env
+  - Task 6 已记录 Worker PID/退出状态，App 关闭时停止领取、SIGTERM 等待并在超时后 Kill
+  - Task 6 已集成 App Start/Close；PM2 仍只管理 wanxiang-agent 主进程
+  - Task 7 已增加管理员执行列表、运行详情、低量扫描启动和停止 Worker API
+  - Task 7 已验证管理员鉴权；匿名与 Agent Token 均不能访问管理执行接口
+  - Task 7 真实 Provider 低量验收以 1 次请求完成，input_tokens=161，output_tokens=95
+  - Task 7 已扫描工作区、Git 跟踪内容、运行日志、进程参数、数据库审计字段和 API 响应，密钥命中均为 0
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
+    result: passed，M06 隔离 worktree 基线通过
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./internal/db -run 'CopyTestEnv|ExecutorMigration|ExecutorTypes'
+    result: passed
+  - command: cmp manager env 与 m06-smoke env，并检查目标权限
+    result: passed，内容一致且目标均为 0600；未输出 env 内容
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task1-bin ./cmd/wanxiang
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/executor -run 'ReadFile|WriteFile|Redact'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task2-bin ./cmd/wanxiang
+    result: passed；首次受限沙箱不允许 httptest 回环监听，授权本地测试端口后重跑通过
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'RunCheck|GitCheckpoint'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task3-bin ./cmd/wanxiang
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/executor -run 'Protocol|Runner'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task4-bin ./cmd/wanxiang
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/executor ./cmd/wanxiang -run Worker
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task5-bin ./cmd/wanxiang
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/executor ./internal/app -run 'Supervisor|Executor'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task6-bin ./cmd/wanxiang
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/httpapi ./internal/executor -run Executor
+    result: passed
+  - command: WANXIANG_LIVE_SMOKE=1 WANXIANG_LIVE_AGENT_ENV=agents/m06-smoke/env go test -count=1 -timeout=60s ./internal/executor -run LiveProviderLowVolumeRunner -v
+    result: passed，status=completed，requests=1，input_tokens=161，output_tokens=95；未记录响应内容
+  - command: go test ./internal/leases ./internal/executor -run 'InterruptExpiredIsIdempotentAndSurvivesServiceRestart|SupervisorWaitsForDependenciesAndSkipsExistingLease|WorkerHeartbeatConflictStopsAndSignalCheckpoints'
+    result: passed，验证 Worker 中断、M05 恢复扫描和有效租约不重复启动
+  - command: 脱密扫描 worktree、Git、process、runtime logs、数据库和 API 响应
+    result: passed，所有密钥命中为 0；manager 源与测试目标 SHA-256 一致且权限均为 0600
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-final-bin ./cmd/wanxiang
+    result: passed
+risks:
+  - 功能分支尚待合并 main、替换生产二进制并完成 PM2 和健康检查
+frontend_build_required: false
+frontend_build_result: not_required
+frontend_build_reason: M06 只增加后端管理 API，未修改 web 源码或管理台页面
+backend_build_required: true
+backend_build_result: passed
+backend_restart_required: true
+backend_restarted: false
+backend_restart_reason: 当前只修改功能分支源码，尚未构建并替换 PM2 指向的生产二进制
+backend_process_manager: pm2
+backend_pm2_app: wanxiang-agent
+backend_pm2_status: not_checked
+backend_healthcheck_result: not_checked
+next_action: 中文提交 Task 7，合并并推送 origin/main，部署后端并验证 PM2 与健康检查
+```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。
 
 实施范围：
 
-- 定义执行器接口，首个实现负责启动和监管本地 Codex/CLI 进程。
+- 定义执行器接口，首个实现只启动和监管调用远程 Provider API 的 Go Worker 子进程。
 - 运行时注入 Agent 自身 Provider 配置、任务令牌和项目范围。
 - 只把 Agent 分配到自己的 worktree，不给平台根目录写权限。
-- 捕获标准输出、退出码、心跳、Token 用量和检查点请求。
+- 只通过允许列表工具执行检查，捕获脱密输出、退出码、心跳、Token 用量和检查点请求。
 - 进程异常退出时触发 M05 中断流程。
 
 验收：

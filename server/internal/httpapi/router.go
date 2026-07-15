@@ -8,6 +8,7 @@ import (
 	"wanxiang-agent/server/internal/agents"
 	"wanxiang-agent/server/internal/assignments"
 	"wanxiang-agent/server/internal/events"
+	"wanxiang-agent/server/internal/executor"
 	"wanxiang-agent/server/internal/issues"
 	"wanxiang-agent/server/internal/leases"
 	"wanxiang-agent/server/internal/mr"
@@ -26,6 +27,7 @@ type Dependencies struct {
 	Assignments *assignments.Service
 	Workspaces  *workspaces.Service
 	Leases      *leases.Service
+	Executor    *executor.AdminService
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -74,6 +76,12 @@ func NewRouter(deps Dependencies) http.Handler {
 			admin.Post("/api/admin/tasks/{taskID}/steps/{stepID}/lease/unfreeze", handleUnfreezeLease(deps.Leases))
 			admin.Post("/api/admin/tasks/{taskID}/steps/{stepID}/lease/reassign", handleReassignLease(deps.Leases))
 			admin.Get("/api/admin/checkpoints/{checkpointID}", handleGetCheckpoint(deps.Leases))
+		}
+		if deps.Executor != nil {
+			admin.Get("/api/admin/executor/runs", handleListExecutorRuns(deps.Executor))
+			admin.Get("/api/admin/executor/runs/{runID}", handleGetExecutorRun(deps.Executor))
+			admin.Post("/api/admin/executor/scan", handleScanExecutor(deps.Executor))
+			admin.Post("/api/admin/executor/runs/{runID}/stop", handleStopExecutorRun(deps.Executor))
 		}
 		if deps.Issues != nil {
 			admin.Post("/api/admin/issues", handleCreateIssue(deps.Issues))

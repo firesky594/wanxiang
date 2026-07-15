@@ -75,7 +75,7 @@
 - [x] 写 Git 测试：只提交受控变更，工作区未知敏感文件时拒绝，不执行 reset/clean。
 - [x] 实现命令允许列表、超时、输出限制和中文 checkpoint。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'RunCheck|GitCheckpoint'`。
-- [ ] 提交：`功能：增加受控测试命令与 Git 检查点`。
+- [x] 提交：`功能：增加受控测试命令与 Git 检查点`（`f4c0005`）。
 
 ### Task 4：Provider JSON 动作循环
 

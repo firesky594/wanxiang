@@ -125,7 +125,7 @@
 - [x] 写阻塞失败测试：没有 clean checkpoint、分支冲突、基线无效时进入 `blocked: recovery_review`，不复制现场。
 - [x] 实现撤销旧 lease、递增 version、更新 assignment、记录 `step_reassignments` 和 `task.step.reassigned`。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Freeze|Deadline|Reassign'`。
-- [ ] 提交：`功能：实现工作包冻结与安全接管`。
+- [x] 提交：`功能：实现工作包冻结与安全接管`（`8389dae`）。
 
 ### Task 6：Agent/Admin API、App Worker 和管理台
 

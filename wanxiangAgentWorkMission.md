@@ -381,6 +381,9 @@ completed:
   - Task 2 已实现原子写入、文件大小限制和 API key、Bearer、密码、env 行脱密
   - Task 3 已实现不经过 shell 的 go/npm/pnpm 检查命令允许列表、超时和脱密输出
   - Task 3 已实现仅暂存 scope 内文件的中文 Git checkpoint，敏感或越界文件会拒绝
+  - Task 4 已实现 Provider v1 严格 JSON 协议、动作整体校验和三次请求预算
+  - Task 4 Runner 固定调用目标 Agent 私有配置，不回退 manager，并累计 Token 用量
+  - Task 4 已串接受控 read/write/check/git/checkpoint 工具并写入脱密运行事件和动作哈希
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./...
     result: passed，M06 隔离 worktree 基线通过
@@ -398,8 +401,12 @@ tests:
     result: passed
   - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task3-bin ./cmd/wanxiang
     result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 ./internal/executor -run 'Protocol|Runner'
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=60s ./... && go build -buildvcs=false -o /tmp/wanxiang-m06-task4-bin ./cmd/wanxiang
+    result: passed
 risks:
-  - Provider 动作循环、Worker 子进程与 Supervisor 仍待实现
+  - Worker 子进程、Supervisor 与低量真实 Provider 验收仍待实现
 frontend_build_required: false
 frontend_build_result: not_required
 frontend_build_reason: 当前只新增后端设计和被 Git 忽略的测试 Agent 配置
@@ -412,7 +419,7 @@ backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: not_checked
 backend_healthcheck_result: not_checked
-next_action: 实施 M06 Task 4 的 Provider JSON 动作循环
+next_action: 实施 M06 Task 5 的 Worker 子进程模式
 ```
 
 目标：启动真实 Agent 进程，让它在分配的 worktree 中消费工作包、运行命令并报告状态。

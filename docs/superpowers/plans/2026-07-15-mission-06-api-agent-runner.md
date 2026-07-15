@@ -89,11 +89,11 @@
 - Consumes: 现有 Provider Adapter、Task/assignment/checkpoint 数据和 Tasks 2-3 工具。
 - Produces: `Runner.Run(context.Context, WorkerInput) (WorkerResult, error)`。
 
-- [ ] 写失败协议测试：严格解析版本、状态、summary 和动作；拒绝未知动作、控制字符、超长内容、秘密字段和越界路径。
-- [ ] 写失败 Runner 测试：只从目标 Agent env 创建 Provider，最多 3 次请求，不回退 manager env，不保存完整对话。
-- [ ] 写动作循环测试：read/write/check/checkpoint 顺序执行，每一步重新校验 lease；401、429、5xx、超时和非法 JSON 得到确定状态。
-- [ ] 实现安全 prompt、JSON 协议、请求预算、Token 记账、有限重试和脱密事件。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'Protocol|Runner'`。
+- [x] 写失败协议测试：严格解析版本、状态、summary 和动作；拒绝未知动作、控制字符、超长内容、秘密字段和越界路径。
+- [x] 写失败 Runner 测试：只从目标 Agent env 创建 Provider，最多 3 次请求，不回退 manager env，不保存完整对话。
+- [x] 写动作循环测试：read/write/check/checkpoint 顺序执行，每一步重新校验 lease；401、429、5xx、超时和非法 JSON 得到确定状态。
+- [x] 实现安全 prompt、JSON 协议、请求预算、Token 记账、有限重试和脱密事件。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor -run 'Protocol|Runner'`。
 - [ ] 提交：`功能：实现 Agent Provider API 动作循环`。
 
 ### Task 5：Worker 子进程模式

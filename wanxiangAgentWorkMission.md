@@ -276,7 +276,7 @@ status: 进行中
 agent: manager
 branch: feat/mission-05
 base_commit: ec90721
-checkpoint_commit: 8389dae
+checkpoint_commit: 7764969
 completed:
   - Task 1 已增加 task_steps 租约、心跳、checkpoint 和恢复字段的幂等迁移
   - Task 1 已增加租约、checkpoint、接管历史表及唯一约束和查询索引

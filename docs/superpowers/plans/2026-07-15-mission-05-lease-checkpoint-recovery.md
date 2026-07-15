@@ -150,7 +150,7 @@
 - [x] 写失败前端 API 测试，验证 lease timeline、extend、freeze、unfreeze 和 reassign 请求体。
 - [x] 在任务详情 M04 workspace 下增加恢复时间线和二次确认操作，移动端保持单列可用。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/httpapi ./internal/app` 和 `npm test && npm run build`。
-- [ ] 提交：`功能：接通租约恢复接口与管理台`。
+- [x] 提交：`功能：接通租约恢复接口与管理台`（`7764969`）。
 
 ### Task 7：全量验证、交接和合并
 

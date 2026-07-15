@@ -21,6 +21,9 @@ func (s *Service) Decide(ctx context.Context, snapshotID int64, in DecisionInput
 		return DecisionResult{}, errors.New("invalid_decision")
 	}
 	if existing, err := s.decisionByKey(ctx, in.IdempotencyKey); err == nil {
+		if existing.SnapshotID != snapshotID || existing.Decision != in.Decision || existing.Comment != in.Comment || existing.CreatedBy != in.CreatedBy {
+			return DecisionResult{}, errors.New("idempotency_conflict")
+		}
 		return s.resultForDecision(ctx, existing)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -63,7 +66,13 @@ func (s *Service) Decide(ctx context.Context, snapshotID int64, in DecisionInput
 	decision := AcceptanceDecision{ID: decisionID, SnapshotID: snapshotID, TaskID: taskID, Decision: in.Decision, Comment: in.Comment, CreatedBy: createdBy, CreatedAt: now}
 	result := DecisionResult{Decision: decision}
 	if in.Decision == "accepted" {
-		_, err = tx.ExecContext(ctx, `update tasks set status='completed' where id=? and status='awaiting_acceptance'`, taskID)
+		var taskResult sql.Result
+		taskResult, err = tx.ExecContext(ctx, `update tasks set status='completed' where id=? and status='awaiting_acceptance'`, taskID)
+		if err == nil {
+			if changed, _ := taskResult.RowsAffected(); changed != 1 {
+				err = ErrStaleSnapshot
+			}
+		}
 		result.TaskStatus = "completed"
 	} else {
 		var round, version int64
@@ -76,7 +85,13 @@ func (s *Service) Decide(ctx context.Context, snapshotID int64, in DecisionInput
 		if err == nil {
 			rid, _ := res.LastInsertId()
 			result.ReworkRound = &ReworkRound{ID: rid, TaskID: taskID, SourceSnapshotID: snapshotID, DecisionID: decisionID, Round: round, PlanVersion: version, Reason: in.Comment, Status: "planning", CreatedBy: createdBy, CreatedAt: now}
-			_, err = tx.ExecContext(ctx, `update tasks set status='rework_planning' where id=? and status='awaiting_acceptance'`, taskID)
+			var taskResult sql.Result
+			taskResult, err = tx.ExecContext(ctx, `update tasks set status='rework_planning' where id=? and status='awaiting_acceptance'`, taskID)
+			if err == nil {
+				if changed, _ := taskResult.RowsAffected(); changed != 1 {
+					err = ErrStaleSnapshot
+				}
+			}
 		}
 		result.TaskStatus = "rework_planning"
 	}

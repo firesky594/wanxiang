@@ -45,6 +45,9 @@ func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snap
 			return item, nil
 		}
 	}
+	if err := s.db.QueryRowContext(ctx, `select main_commit from manager_notifications where task_id=? and status in ('pending','processing') order by id desc limit 1`, taskID).Scan(&mainCommit); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Snapshot{}, err
+	}
 	var planVersion int64
 	if err := s.db.QueryRowContext(ctx, `select coalesce(max(version),1) from task_plan_versions where task_id=?`, taskID).Scan(&planVersion); err != nil {
 		return Snapshot{}, err
@@ -94,6 +97,25 @@ func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snap
 		return Snapshot{}, err
 	}
 	id, _ := res.LastInsertId()
+	notificationRows, err := tx.QueryContext(ctx, `select id from manager_notifications where task_id=? and status in ('pending','processing') order by id`, taskID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	var notificationIDs []int64
+	for notificationRows.Next() {
+		var nid int64
+		if err = notificationRows.Scan(&nid); err != nil {
+			notificationRows.Close()
+			return Snapshot{}, err
+		}
+		notificationIDs = append(notificationIDs, nid)
+	}
+	notificationRows.Close()
+	for _, nid := range notificationIDs {
+		if _, err = tx.ExecContext(ctx, `insert into delivery_snapshot_notifications(snapshot_id,notification_id) values(?,?)`, id, nid); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	for _, risk := range evidence.Risks {
 		if isHighRisk(risk) {
 			title := fmt.Sprintf("交付版本 %d 高风险事项需单独确认", version)
@@ -102,7 +124,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snap
 			}
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `update manager_notifications set status='consumed',consumed_at=?,last_error='',next_retry_at=null where task_id=? and status='pending'`, now, taskID); err != nil {
+	if _, err = tx.ExecContext(ctx, `update manager_notifications set status='consumed',consumed_at=?,processing_started_at=null,last_error='',next_retry_at=null where task_id=? and status in ('pending','processing')`, now, taskID); err != nil {
 		return Snapshot{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `update tasks set status='awaiting_acceptance' where id=?`, taskID); err != nil {
@@ -119,8 +141,8 @@ func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snap
 }
 
 func (s *Service) collectEvidence(ctx context.Context, taskID, planVersion int64) (Evidence, error) {
-	result := Evidence{MergeRequests: []MergeEvidence{}, Reports: []ReportEvidence{}, Tests: []TestEvidence{}, Risks: []string{}, Incomplete: []string{}}
-	rows, err := s.db.QueryContext(ctx, `select mr.id,mr.step_id,mr.status,mr.source_commit,mr.merge_commit,cr.id,cr.agent_name,cr.completed_json,cr.incomplete_json,cr.key_files_json,cr.tests_json,cr.risks_json from merge_requests mr join completion_reports cr on cr.id=mr.report_id join task_steps st on st.id=mr.step_id where mr.task_id=? and st.plan_version=? order by mr.id`, taskID, planVersion)
+	result := Evidence{MergeRequests: []MergeEvidence{}, Reports: []ReportEvidence{}, Tests: []TestEvidence{}, Risks: []string{}, Incomplete: []string{}, WorkItems: []WorkItemEvidence{}, Reviews: []ReviewEvidence{}, UserDecisions: []string{}, HighRisk: []string{}}
+	rows, err := s.db.QueryContext(ctx, `select mr.id,mr.step_id,mr.status,mr.source_commit,mr.merge_commit,cr.id,cr.agent_name,cr.completed_json,cr.incomplete_json,cr.key_files_json,cr.tests_json,cr.risks_json,cr.user_decision from merge_requests mr join completion_reports cr on cr.id=mr.report_id join task_steps st on st.id=mr.step_id where mr.task_id=? and st.plan_version=? order by mr.id`, taskID, planVersion)
 	if err != nil {
 		return result, err
 	}
@@ -128,21 +150,84 @@ func (s *Service) collectEvidence(ctx context.Context, taskID, planVersion int64
 	for rows.Next() {
 		var m MergeEvidence
 		var r ReportEvidence
-		var completed, incomplete, keyFiles, tests, risks string
-		if err := rows.Scan(&m.ID, &m.StepID, &m.Status, &m.SourceCommit, &m.MergeCommit, &r.ID, &m.AgentName, &completed, &incomplete, &keyFiles, &tests, &risks); err != nil {
+		var completed, incomplete, keyFiles, tests, risks, userDecision string
+		if err := rows.Scan(&m.ID, &m.StepID, &m.Status, &m.SourceCommit, &m.MergeCommit, &r.ID, &m.AgentName, &completed, &incomplete, &keyFiles, &tests, &risks, &userDecision); err != nil {
 			return result, err
 		}
 		r.StepID = m.StepID
 		r.AgentName = m.AgentName
 		r.Completed = decodeStrings(completed)
 		r.KeyFiles = decodeStrings(keyFiles)
+		m.AgentName = scrub(m.AgentName)
+		r.AgentName = scrub(r.AgentName)
+		for i := range r.Completed {
+			r.Completed[i] = scrub(r.Completed[i])
+		}
+		for i := range r.KeyFiles {
+			r.KeyFiles[i] = scrub(r.KeyFiles[i])
+		}
+		newTests := decodeTests(tests)
+		for i := range newTests {
+			newTests[i].Command = scrub(newTests[i].Command)
+			newTests[i].Summary = scrub(newTests[i].Summary)
+		}
+		newRisks := decodeStrings(risks)
+		for i := range newRisks {
+			newRisks[i] = scrub(newRisks[i])
+		}
+		newIncomplete := decodeStrings(incomplete)
+		for i := range newIncomplete {
+			newIncomplete[i] = scrub(newIncomplete[i])
+		}
 		result.MergeRequests = append(result.MergeRequests, m)
 		result.Reports = append(result.Reports, r)
-		result.Tests = append(result.Tests, decodeTests(tests)...)
-		result.Risks = append(result.Risks, decodeStrings(risks)...)
-		result.Incomplete = append(result.Incomplete, decodeStrings(incomplete)...)
+		result.Tests = append(result.Tests, newTests...)
+		result.Risks = append(result.Risks, newRisks...)
+		result.Incomplete = append(result.Incomplete, newIncomplete...)
+		if strings.TrimSpace(userDecision) != "" {
+			result.UserDecisions = append(result.UserDecisions, scrub(userDecision))
+		}
+		for _, risk := range newRisks {
+			if isHighRisk(risk) {
+				result.HighRisk = append(result.HighRisk, risk)
+			}
+		}
 	}
-	return result, rows.Err()
+	if err = rows.Err(); err != nil {
+		return result, err
+	}
+	stepRows, err := s.db.QueryContext(ctx, `select id,agent_name,kind,status,input from task_steps where task_id=? and plan_version=? order by id`, taskID, planVersion)
+	if err != nil {
+		return result, err
+	}
+	for stepRows.Next() {
+		var w WorkItemEvidence
+		var raw string
+		if err = stepRows.Scan(&w.StepID, &w.AgentName, &w.Kind, &w.Status, &raw); err != nil {
+			stepRows.Close()
+			return result, err
+		}
+		w.AgentName = scrub(w.AgentName)
+		w.Input = sanitizeJSON(raw)
+		result.WorkItems = append(result.WorkItems, w)
+	}
+	stepRows.Close()
+	reviewRows, err := s.db.QueryContext(ctx, `select r.mr_id,r.reviewer,r.role,r.status,r.body,r.created_at from mr_reviews r join merge_requests mr on mr.id=r.mr_id join task_steps st on st.id=mr.step_id where mr.task_id=? and st.plan_version=? order by r.id`, taskID, planVersion)
+	if err != nil {
+		return result, err
+	}
+	for reviewRows.Next() {
+		var r ReviewEvidence
+		if err = reviewRows.Scan(&r.MRID, &r.Reviewer, &r.Role, &r.Status, &r.Body, &r.CreatedAt); err != nil {
+			reviewRows.Close()
+			return result, err
+		}
+		r.Reviewer = scrub(r.Reviewer)
+		r.Body = scrub(r.Body)
+		result.Reviews = append(result.Reviews, r)
+	}
+	reviewRows.Close()
+	return result, reviewRows.Err()
 }
 
 func (s *Service) snapshotByNotification(ctx context.Context, id int64) (Snapshot, error) {
@@ -189,6 +274,51 @@ func isHighRisk(value string) bool {
 		}
 	}
 	return false
+}
+
+func scrub(value string) string {
+	lower := strings.ToLower(value)
+	for _, marker := range []string{"bearer ", "bearer:", "sk-", "api_key=", "api-key=", "token=", "password=", "secret=", "access_key=", "private_key="} {
+		if i := strings.Index(lower, marker); i >= 0 {
+			return value[:i] + "[REDACTED]"
+		}
+	}
+	return value
+}
+
+func sanitizeJSON(raw string) json.RawMessage {
+	var value any
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		encoded, _ := json.Marshal(scrub(raw))
+		return encoded
+	}
+	value = sanitizeValue(value)
+	encoded, _ := json.Marshal(value)
+	return encoded
+}
+
+func sanitizeValue(value any) any {
+	switch v := value.(type) {
+	case string:
+		return scrub(v)
+	case []any:
+		for i := range v {
+			v[i] = sanitizeValue(v[i])
+		}
+		return v
+	case map[string]any:
+		for key, item := range v {
+			lower := strings.ToLower(key)
+			if strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "password") || strings.Contains(lower, "api_key") || strings.Contains(lower, "env") {
+				v[key] = "[REDACTED]"
+			} else {
+				v[key] = sanitizeValue(item)
+			}
+		}
+		return v
+	default:
+		return value
+	}
 }
 
 func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([]Snapshot, error) {

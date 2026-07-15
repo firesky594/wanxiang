@@ -14,11 +14,15 @@ var (
 )
 
 type Evidence struct {
-	MergeRequests []MergeEvidence  `json:"merge_requests"`
-	Reports       []ReportEvidence `json:"reports"`
-	Tests         []TestEvidence   `json:"tests"`
-	Risks         []string         `json:"risks"`
-	Incomplete    []string         `json:"incomplete"`
+	MergeRequests []MergeEvidence    `json:"merge_requests"`
+	Reports       []ReportEvidence   `json:"reports"`
+	Tests         []TestEvidence     `json:"tests"`
+	Risks         []string           `json:"risks"`
+	Incomplete    []string           `json:"incomplete"`
+	WorkItems     []WorkItemEvidence `json:"work_items"`
+	Reviews       []ReviewEvidence   `json:"reviews"`
+	UserDecisions []string           `json:"user_decisions"`
+	HighRisk      []string           `json:"high_risk"`
 }
 
 type MergeEvidence struct {
@@ -40,6 +44,21 @@ type TestEvidence struct {
 	Command string `json:"command"`
 	Status  string `json:"status"`
 	Summary string `json:"summary,omitempty"`
+}
+type WorkItemEvidence struct {
+	StepID    int64           `json:"step_id"`
+	AgentName string          `json:"agent_name"`
+	Kind      string          `json:"kind"`
+	Status    string          `json:"status"`
+	Input     json.RawMessage `json:"input"`
+}
+type ReviewEvidence struct {
+	MRID      int64  `json:"mr_id"`
+	Reviewer  string `json:"reviewer"`
+	Role      string `json:"role"`
+	Status    string `json:"status"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
 }
 
 type Snapshot struct {

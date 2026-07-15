@@ -81,3 +81,33 @@ func TestDecisionValidationAndConcurrency(t *testing.T) {
 		t.Fatalf("success=%d closed=%d", success, closed)
 	}
 }
+
+func TestDecisionIdempotencyKeyCannotCrossSnapshotOrActor(t *testing.T) {
+	db := testutil.OpenDB(t)
+	_, n := deliveryFixture(t, db)
+	svc := NewService(db, nil)
+	snap, _ := svc.BuildSnapshot(context.Background(), n)
+	_, err := svc.Decide(context.Background(), snap.ID, DecisionInput{Decision: "accepted", IdempotencyKey: "shared", CreatedBy: "admin-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Decide(context.Background(), snap.ID+1, DecisionInput{Decision: "accepted", IdempotencyKey: "shared", CreatedBy: "admin-b"}); err == nil {
+		t.Fatal("cross-snapshot/actor idempotency key was accepted")
+	}
+}
+
+func TestDecisionDoesNotSplitTaskAndSnapshotState(t *testing.T) {
+	db := testutil.OpenDB(t)
+	taskID, n := deliveryFixture(t, db)
+	svc := NewService(db, nil)
+	snap, _ := svc.BuildSnapshot(context.Background(), n)
+	_, _ = db.Exec(`update tasks set status='blocked' where id=?`, taskID)
+	if _, err := svc.Decide(context.Background(), snap.ID, DecisionInput{Decision: "accepted", IdempotencyKey: "blocked", CreatedBy: "admin"}); err == nil {
+		t.Fatal("decision succeeded for task outside awaiting_acceptance")
+	}
+	var status string
+	_ = db.QueryRow(`select status from delivery_snapshots where id=?`, snap.ID).Scan(&status)
+	if status != "awaiting_acceptance" {
+		t.Fatalf("snapshot status=%s", status)
+	}
+}

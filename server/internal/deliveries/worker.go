@@ -45,7 +45,9 @@ func (w *Worker) Start() {
 }
 func (w *Worker) Close() { w.once.Do(func() { close(w.stop); <-w.done }) }
 func (w *Worker) Scan(ctx context.Context) error {
-	rows, err := w.db.QueryContext(ctx, `select id from manager_notifications where status='pending' and (next_retry_at is null or next_retry_at<=?) order by id limit 20`, time.Now().UTC().Format(time.RFC3339Nano))
+	now := time.Now().UTC()
+	staleNotification := now.Add(-5 * time.Minute).Format(time.RFC3339Nano)
+	rows, err := w.db.QueryContext(ctx, `select id from manager_notifications where (status='pending' and (next_retry_at is null or next_retry_at<=?)) or (status='processing' and processing_started_at<?) order by id limit 20`, now.Format(time.RFC3339Nano), staleNotification)
 	if err != nil {
 		return err
 	}
@@ -60,13 +62,22 @@ func (w *Worker) Scan(ctx context.Context) error {
 	}
 	rows.Close()
 	for _, id := range ids {
+		claim, claimErr := w.db.ExecContext(ctx, `update manager_notifications set status='processing',processing_started_at=? where id=? and (status='pending' or (status='processing' and processing_started_at<?))`, now.Format(time.RFC3339Nano), id, staleNotification)
+		if claimErr != nil {
+			continue
+		}
+		if changed, _ := claim.RowsAffected(); changed != 1 {
+			continue
+		}
 		if _, err = w.service.BuildSnapshot(ctx, id); err != nil {
 			retry := time.Now().UTC().Add(5 * time.Second).Format(time.RFC3339Nano)
-			_, _ = w.db.ExecContext(ctx, `update manager_notifications set last_error=?,next_retry_at=? where id=? and status='pending'`, redactError(err), retry, id)
+			_, _ = w.db.ExecContext(ctx, `update manager_notifications set status='pending',processing_started_at=null,last_error=?,next_retry_at=? where id=? and status='processing'`, redactError(err), retry, id)
 		}
 	}
 	if w.rework != nil {
-		rounds, err := w.db.QueryContext(ctx, `select id,task_id,plan_version,reason from rework_rounds where status in ('planning','blocked: missing_config') order by id limit 10`)
+		now := time.Now().UTC()
+		stale := now.Add(-5 * time.Minute).Format(time.RFC3339Nano)
+		rounds, err := w.db.QueryContext(ctx, `select id,task_id,plan_version,reason from rework_rounds where status in ('planning','blocked: missing_config') or (status='processing' and processing_started_at<?) order by id limit 10`, stale)
 		if err == nil {
 			type item struct {
 				id, task, version int64
@@ -81,16 +92,30 @@ func (w *Worker) Scan(ctx context.Context) error {
 			}
 			rounds.Close()
 			for _, x := range items {
-				_, _ = w.db.ExecContext(ctx, `update rework_rounds set status='planning',last_error='' where id=?`, x.id)
+				var taskStatus, versionStatus string
+				_ = w.db.QueryRowContext(ctx, `select status from tasks where id=?`, x.task).Scan(&taskStatus)
+				_ = w.db.QueryRowContext(ctx, `select status from task_plan_versions where task_id=? and version=?`, x.task, x.version).Scan(&versionStatus)
+				if taskStatus == "planned" && versionStatus == "planned" {
+					_, _ = w.db.ExecContext(ctx, `update rework_rounds set status='planned',completed_at=?,last_error='',processing_started_at=null where id=?`, now.Format(time.RFC3339Nano), x.id)
+					continue
+				}
+				claim, claimErr := w.db.ExecContext(ctx, `update rework_rounds set status='processing',processing_started_at=?,last_error='' where id=? and (status in ('planning','blocked: missing_config') or (status='processing' and processing_started_at<?))`, now.Format(time.RFC3339Nano), x.id, stale)
+				if claimErr != nil {
+					continue
+				}
+				if changed, _ := claim.RowsAffected(); changed != 1 {
+					continue
+				}
 				if err := w.rework(ctx, x.task, x.version, x.reason); err != nil {
 					status := "blocked"
-					if strings.Contains(err.Error(), "missing_config") {
+					lower := strings.ToLower(err.Error())
+					if strings.Contains(lower, "missing_config") || strings.Contains(lower, "api_key") || strings.Contains(lower, "api key") || strings.Contains(lower, "provider_type") || strings.Contains(lower, "model are required") {
 						status = "blocked: missing_config"
 					}
-					_, _ = w.db.ExecContext(ctx, `update rework_rounds set status=?,last_error=? where id=?`, status, redactError(err), x.id)
+					_, _ = w.db.ExecContext(ctx, `update rework_rounds set status=?,last_error=?,processing_started_at=null where id=?`, status, redactError(err), x.id)
 				} else {
-					now := time.Now().UTC().Format(time.RFC3339Nano)
-					_, _ = w.db.ExecContext(ctx, `update rework_rounds set status='planned',completed_at=?,last_error='' where id=?`, now, x.id)
+					finished := time.Now().UTC().Format(time.RFC3339Nano)
+					_, _ = w.db.ExecContext(ctx, `update rework_rounds set status='planned',completed_at=?,last_error='',processing_started_at=null where id=?`, finished, x.id)
 				}
 			}
 		}

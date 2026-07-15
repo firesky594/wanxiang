@@ -27,6 +27,7 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`create table if not exists task_plan_versions (id integer primary key, task_id integer not null, version integer not null, source_snapshot_id integer, source_decision_id integer, status text not null, summary text not null default '', created_at text not null, unique(task_id,version))`,
 		`create table if not exists delivery_snapshots (id integer primary key, task_id integer not null, project_id integer not null, version integer not null, manager_notification_id integer not null unique, main_commit text not null, status text not null, summary text not null, summary_hash text not null, evidence_json text not null, created_by text not null, created_at text not null, unique(task_id,version))`,
 		`create index if not exists idx_delivery_snapshots_task_status on delivery_snapshots(task_id,status,version)`,
+		`create table if not exists delivery_snapshot_notifications (snapshot_id integer not null, notification_id integer not null unique, primary key(snapshot_id,notification_id))`,
 		`create table if not exists acceptance_decisions (id integer primary key, snapshot_id integer not null, task_id integer not null, decision text not null, comment text not null default '', idempotency_key text not null unique, created_by text not null, created_at text not null)`,
 		`create table if not exists rework_rounds (id integer primary key, task_id integer not null, source_snapshot_id integer not null, decision_id integer not null unique, round integer not null, plan_version integer not null, reason text not null, status text not null, checkpoint_json text not null default '{}', last_error text not null default '', created_by text not null, created_at text not null, completed_at text, unique(task_id,round), unique(task_id,plan_version))`,
 		`create index if not exists idx_rework_rounds_status on rework_rounds(status,created_at)`,
@@ -97,6 +98,9 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		{"merge_requests", "merge_commit", "text not null default ''"},
 		{"manager_notifications", "last_error", "text not null default ''"},
 		{"manager_notifications", "next_retry_at", "text"},
+		{"manager_notifications", "processing_started_at", "text"},
+		{"rework_rounds", "next_retry_at", "text"},
+		{"rework_rounds", "processing_started_at", "text"},
 		{"task_steps", "plan_version", "integer not null default 1"},
 		{"workflow_edges", "plan_version", "integer not null default 1"},
 	} {

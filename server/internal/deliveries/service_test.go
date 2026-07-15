@@ -3,6 +3,8 @@ package deliveries
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"wanxiang-agent/server/internal/events"
@@ -38,6 +40,63 @@ func TestBuildSnapshotRejectsIncompleteCurrentPlan(t *testing.T) {
 	_, err := NewService(db, nil).BuildSnapshot(context.Background(), notificationID)
 	if err != ErrNotReady {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestBuildSnapshotRedactsSecretsAndCreatesHighRiskIssue(t *testing.T) {
+	db := testutil.OpenDB(t)
+	taskID, n := deliveryFixture(t, db)
+	_, _ = db.Exec(`update completion_reports set risks_json='["生产部署 Bearer [TEST_TOKEN]"]',tests_json='[{"command":"curl -H Authorization:Bearer [TEST_TOKEN]","status":"passed"}]'`)
+	snap, err := NewService(db, nil).BuildSnapshot(context.Background(), n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(snap)
+	if strings.Contains(string(encoded), "TEST_TOKEN") {
+		t.Fatalf("secret leaked: %s", encoded)
+	}
+	var blockers int
+	_ = db.QueryRow(`select count(*) from issues where task_id=? and blocking=1`, taskID).Scan(&blockers)
+	if blockers != 1 {
+		t.Fatalf("blockers=%d", blockers)
+	}
+}
+
+func TestBuildSnapshotUsesLatestNotificationAndKeepsNotificationAudit(t *testing.T) {
+	db := testutil.OpenDB(t)
+	_, first := deliveryFixture(t, db)
+	var taskID, projectID, mrID, reportID int64
+	_ = db.QueryRow(`select task_id,project_id,mr_id,report_id from manager_notifications where id=?`, first).Scan(&taskID, &projectID, &mrID, &reportID)
+	res, _ := db.Exec(`insert into manager_notifications(project_id,task_id,mr_id,report_id,project_lead,main_commit,payload_json,status,created_at) values(?,?,?,?,?,'latest','{}','pending','later')`, projectID, taskID, mrID+1, reportID, "lead")
+	latest, _ := res.LastInsertId()
+	snap, err := NewService(db, nil).BuildSnapshot(context.Background(), first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.MainCommit != "latest" {
+		t.Fatalf("main_commit=%s", snap.MainCommit)
+	}
+	var links, pending int
+	_ = db.QueryRow(`select count(*) from delivery_snapshot_notifications where snapshot_id=?`, snap.ID).Scan(&links)
+	_ = db.QueryRow(`select count(*) from manager_notifications where task_id=? and status='pending'`, taskID).Scan(&pending)
+	if links != 2 || pending != 0 || latest == 0 {
+		t.Fatalf("links=%d pending=%d", links, pending)
+	}
+}
+
+func TestBuildSnapshotCollectsCompleteEvidenceAndRedactsCredentialForms(t *testing.T) {
+	db := testutil.OpenDB(t)
+	_, n := deliveryFixture(t, db)
+	_, _ = db.Exec(`update task_steps set input='{"secret":"PASSWORD=hunter2"}'`)
+	_, _ = db.Exec(`update completion_reports set user_decision='TOKEN=private'`)
+	_, _ = db.Exec(`insert into mr_reviews(mr_id,reviewer,role,status,body,created_at) select id,'lead','project_lead','approved','SECRET=value','now' from merge_requests limit 1`)
+	snap, err := NewService(db, nil).BuildSnapshot(context.Background(), n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(snap.Evidence)
+	if len(snap.Evidence.WorkItems) != 1 || len(snap.Evidence.Reviews) != 1 || len(snap.Evidence.UserDecisions) != 1 || strings.Contains(string(encoded), "hunter2") || strings.Contains(string(encoded), "private") || strings.Contains(string(encoded), "value") {
+		t.Fatalf("evidence=%s", encoded)
 	}
 }
 

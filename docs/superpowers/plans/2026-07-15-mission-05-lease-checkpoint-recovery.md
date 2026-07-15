@@ -118,13 +118,13 @@
 - Produces: `Reassign(context.Context, ReassignInput, actor string) (Lease, error)`。
 - Produces: 接力分支 `agent/<new-agent>/<work-item>-resume-<attempt>` 和独立 recovery worktree。
 
-- [ ] 写失败测试：冻结立即撤销写权限；解冻递增 version 并生成新 lease，不复活旧 ID。
-- [ ] 写延期失败测试：只允许 interrupted lease 延期，并写审计日志。
-- [ ] 写接管失败测试：未过 deadline 且未明确 immediate 时拒绝；新 Agent 必须 online、满足 assignment ownership 或经 manager 改派。
-- [ ] 写 Git 集成失败测试：从最近 clean checkpoint 创建新分支/worktree，原 worktree 和脏文件保持不变。
-- [ ] 写阻塞失败测试：没有 clean checkpoint、分支冲突、基线无效时进入 `blocked: recovery_review`，不复制现场。
-- [ ] 实现撤销旧 lease、递增 version、更新 assignment、记录 `step_reassignments` 和 `task.step.reassigned`。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Freeze|Deadline|Reassign'`。
+- [x] 写失败测试：冻结立即撤销写权限；解冻递增 version 并生成新 lease，不复活旧 ID。
+- [x] 写延期失败测试：只允许 interrupted lease 延期，并写审计日志。
+- [x] 写接管失败测试：未过 deadline 且未明确 immediate 时拒绝；新 Agent 必须 online、满足 assignment ownership 或经 manager 改派。
+- [x] 写 Git 集成失败测试：从最近 clean checkpoint 创建新分支/worktree，原 worktree 和脏文件保持不变。
+- [x] 写阻塞失败测试：没有 clean checkpoint、分支冲突、基线无效时进入 `blocked: recovery_review`，不复制现场。
+- [x] 实现撤销旧 lease、递增 version、更新 assignment、记录 `step_reassignments` 和 `task.step.reassigned`。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/leases -run 'Freeze|Deadline|Reassign'`。
 - [ ] 提交：`功能：实现工作包冻结与安全接管`。
 
 ### Task 6：Agent/Admin API、App Worker 和管理台

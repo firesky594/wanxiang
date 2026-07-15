@@ -29,12 +29,12 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`create table if not exists task_assignments (id integer primary key, task_id integer not null, step_id integer not null unique, agent_name text not null, reports_to text, status text not null, decision_id integer not null, created_at text not null)`,
 		`create table if not exists team_decisions (id integer primary key, task_id integer not null unique, project_lead text, requires_lead integer not null default 0, reason text not null, created_at text not null)`,
 		`create table if not exists project_workspaces (id integer primary key, project_id integer not null, task_id integer not null, step_id integer not null unique, assignment_id integer not null, agent_name text not null, reports_to text, branch_name text not null unique, worktree_path text not null unique, base_commit text not null, provision_commit text not null default '', write_scope_json text not null, metadata_hash text not null, status text not null, last_error text not null default '', created_at text not null, updated_at text not null, cleaned_at text)`,
-		`create table if not exists task_step_leases (id integer primary key, task_id integer not null, step_id integer not null, agent_name text not null, lease_id text not null unique, lease_version integer not null, status text not null, acquired_at text not null, expires_at text not null, last_heartbeat_at text, interrupted_at text, resume_deadline text, revoked_at text, created_at text not null, updated_at text not null, unique(step_id, lease_version))`,
+		`create table if not exists task_step_leases (id integer primary key, task_id integer not null, step_id integer not null, agent_name text not null, lease_id text not null unique, lease_version integer not null, status text not null, branch_name text not null default '', worktree_path text not null default '', acquired_at text not null, expires_at text not null, last_heartbeat_at text, interrupted_at text, resume_deadline text, revoked_at text, revoked_reason text not null default '', created_at text not null, updated_at text not null, unique(step_id, lease_version))`,
 		`create index if not exists idx_task_step_leases_step_status on task_step_leases(step_id, status)`,
 		`create index if not exists idx_task_step_leases_expiry on task_step_leases(status, expires_at)`,
 		`create table if not exists task_checkpoints (id integer primary key, task_id integer not null, step_id integer not null, lease_id text not null, idempotency_key text not null, git_commit text not null default '', branch_name text not null default '', clean integer not null default 0, files_json text not null default '[]', tests_json text not null default '[]', summary_json text not null, summary_hash text not null, high_risk integer not null default 0, created_at text not null, unique(lease_id, idempotency_key))`,
 		`create index if not exists idx_task_checkpoints_step_created on task_checkpoints(step_id, created_at)`,
-		`create table if not exists step_reassignments (id integer primary key, task_id integer not null, step_id integer not null, from_agent text not null, to_agent text not null, from_lease_id text not null, to_lease_id text not null default '', checkpoint_id integer, attempt integer not null, reason text not null, status text not null, created_by text not null, created_at text not null, completed_at text)`,
+		`create table if not exists step_reassignments (id integer primary key, task_id integer not null, step_id integer not null, from_agent text not null, to_agent text not null, from_lease_id text not null, to_lease_id text not null default '', checkpoint_id integer, attempt integer not null, reason text not null, status text not null, from_branch text not null default '', from_worktree text not null default '', to_branch text not null default '', to_worktree text not null default '', created_by text not null, created_at text not null, completed_at text)`,
 		`create index if not exists idx_step_reassignments_step on step_reassignments(step_id, created_at)`,
 	}
 	for _, stmt := range stmts {
@@ -57,6 +57,21 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 	}
 	for _, column := range columns {
 		if err := ensureColumn(ctx, conn, "task_steps", column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	for _, column := range []struct {
+		table, name, definition string
+	}{
+		{"task_step_leases", "branch_name", "text not null default ''"},
+		{"task_step_leases", "worktree_path", "text not null default ''"},
+		{"task_step_leases", "revoked_reason", "text not null default ''"},
+		{"step_reassignments", "from_branch", "text not null default ''"},
+		{"step_reassignments", "from_worktree", "text not null default ''"},
+		{"step_reassignments", "to_branch", "text not null default ''"},
+		{"step_reassignments", "to_worktree", "text not null default ''"},
+	} {
+		if err := ensureColumn(ctx, conn, column.table, column.name, column.definition); err != nil {
 			return err
 		}
 	}

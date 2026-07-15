@@ -93,6 +93,18 @@ func TestMigrateCreatesLeaseUniqueConstraints(t *testing.T) {
 	if _, err := conn.Exec(insertCheckpoint, "key-1", now); err == nil {
 		t.Fatal("duplicate lease checkpoint idempotency key was accepted")
 	}
+	for table, columns := range map[string][]string{
+		"task_step_leases":   {"branch_name", "worktree_path", "revoked_reason"},
+		"step_reassignments": {"from_branch", "from_worktree", "to_branch", "to_worktree"},
+	} {
+		for _, column := range columns {
+			var count int
+			query := `select count(*) from pragma_table_info('` + table + `') where name=?`
+			if err := conn.QueryRow(query, column).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("%s.%s count=%d err=%v", table, column, count, err)
+			}
+		}
+	}
 }
 
 func TestMigrateAuthTablesIsIdempotent(t *testing.T) {

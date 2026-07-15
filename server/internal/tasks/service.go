@@ -175,7 +175,8 @@ func validTransition(current, next string) bool {
 	allowed := map[string]map[string]bool{
 		"created":           {"planning": true, "blocked": true},
 		"planning":          {"assigned": true, "blocked": true},
-		"assigned":          {"in_progress": true, "blocked": true},
+		"assigned":          {"workspace_ready": true, "in_progress": true, "blocked": true},
+		"workspace_ready":   {"in_progress": true, "blocked": true},
 		"in_progress":       {"review": true, "blocked": true, "interrupted": true},
 		"interrupted":       {"in_progress": true, "blocked": true},
 		"review":            {"merged": true, "changes_requested": true, "blocked": true},

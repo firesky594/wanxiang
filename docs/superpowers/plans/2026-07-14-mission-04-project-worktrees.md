@@ -77,12 +77,12 @@
 - Produces: `workspaces.Service.GetTask(context.Context, int64) (TaskWorkspace, error)`.
 - Produces: task status `workspace_ready`。
 
-- [ ] 写 Git 集成失败测试：两个 Agent 共享代码 `base_commit`，从同一 `provision_commit` 创建不同分支和不同 worktree，数据库记录为 `ready`。
-- [ ] 写幂等与恢复失败测试：重复调用不重复提交或创建；`provisioning` 中断后校验现存资源并继续。
-- [ ] 写安全失败测试：同名未知分支、未知非空目录、脏 `main`、分支格式错误只记录 `failed`，不删除现场。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces -run Provision`，确认失败。
-- [ ] 实现项目级进程内锁、`provisioning -> ready/failed` 状态机、中文 metadata 提交、`git worktree add -b` 和安全错误摘要。
-- [ ] 更新合法任务状态转换 `assigned -> workspace_ready`，重跑 workspaces 和 tasks 测试。
+- [x] 写 Git 集成失败测试：两个 Agent 共享代码 `base_commit`，从同一 `provision_commit` 创建不同分支和不同 worktree，数据库记录为 `ready`。
+- [x] 写幂等与恢复失败测试：重复调用不重复提交或创建；`provisioning` 中断后校验现存资源并继续。
+- [x] 写安全失败测试：同名未知分支、未知非空目录、脏 `main`、分支格式错误只记录 `failed`，不删除现场。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces -run Provision`，确认失败。
+- [x] 实现项目级进程内锁、`provisioning -> ready/failed` 状态机、中文 metadata 提交、`git worktree add -b` 和安全错误摘要。
+- [x] 更新合法任务状态转换 `assigned -> workspace_ready`，重跑 workspaces 和 tasks 测试。
 - [ ] 提交：`功能：创建独立 Agent 分支与工作区`。
 
 ### Task 4: 双向漂移校验、修复和安全清理

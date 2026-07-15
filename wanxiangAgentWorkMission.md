@@ -218,6 +218,8 @@ completed:
   - 支持安全复用已登记且干净的 main 项目
   - 增加 project_workspaces 数据状态和唯一约束
   - 实现确定性 project 与 assignment YAML、哈希和安全校验
+  - 实现幂等 provision、中文元数据提交和独立 Agent worktree
+  - 支持 provision 中断恢复并拒绝未知分支或非空目录
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./...
     result: baseline passed
@@ -231,7 +233,7 @@ backend_build_result: pending
 backend_restart_required: true
 backend_restarted: false
 backend_restart_reason: 尚未替换运行中的后端二进制
-next_action: 实现幂等 provision 和独立 Agent worktree
+next_action: 实现数据库、Git 快照和 worktree 的双向漂移校验
 ```
 
 目标：建立可执行、可审计的项目范围和 Git 隔离环境。

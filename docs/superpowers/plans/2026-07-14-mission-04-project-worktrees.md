@@ -120,11 +120,11 @@
 - Produces: `GET /api/admin/tasks/{id}/workspace`、`POST .../reconcile`、`POST .../repair`、`POST .../cleanup`。
 - Produces: `Service.AuthorizeAgent(context.Context, agent, taskID, stepID, relativePath) error` 供 M05、M06 复用。
 
-- [ ] 写失败测试，Worker 消费 `assigned` 并周期校验 `workspace_ready`，重启不重复创建资源。
-- [ ] 写失败 HTTP 测试，覆盖查询、校验、修复方向、清理确认和管理员审计。
-- [ ] 写 ownership 失败测试，拒绝非 assignment Agent、跨 task/step、绝对路径、`..` 和 scope 外路径。
-- [ ] 实现 Worker、App 生命周期和管理员路由；Agent ownership 保持为服务接口，不开放任意写文件 API。
-- [ ] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces ./internal/httpapi ./internal/app`。
+- [x] 写失败测试，Worker 消费 `assigned` 并周期校验 `workspace_ready`，重启不重复创建资源。
+- [x] 写失败 HTTP 测试，覆盖查询、校验、修复方向、清理确认和管理员审计。
+- [x] 写 ownership 失败测试，拒绝非 assignment Agent、跨 task/step、绝对路径、`..` 和 scope 外路径。
+- [x] 实现 Worker、App 生命周期和管理员路由；Agent ownership 保持为服务接口，不开放任意写文件 API。
+- [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/workspaces ./internal/httpapi ./internal/app`。
 - [ ] 提交：`功能：接通工作区自动编排与管理接口`。
 
 ### Task 6: 管理台项目选择和 workspace 轨迹

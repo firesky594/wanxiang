@@ -113,6 +113,27 @@ func TestProvisionTaskDoesNotReuseUnknownBranchOrDirectory(t *testing.T) {
 	}
 }
 
+func TestAuthorizeAgentEnforcesAssignmentIdentityAndScope(t *testing.T) {
+	cfg, conn, taskID, _ := workspaceFixture(t)
+	svc := NewService(cfg, conn, nil)
+	workspace, err := svc.ProvisionTask(t.Context(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepID := workspace.Items[0].StepID
+	if err = svc.AuthorizeAgent(t.Context(), "api", taskID, stepID, "src/api.go"); err != nil {
+		t.Fatal(err)
+	}
+	for _, probe := range []struct {
+		agent, path string
+		task, step  int64
+	}{{"web", "src/api.go", taskID, stepID}, {"api", "../secret", taskID, stepID}, {"api", "/tmp/secret", taskID, stepID}, {"api", "src/api.go", taskID + 1, stepID}, {"api", "src/api.go", taskID, stepID + 99}} {
+		if err = svc.AuthorizeAgent(t.Context(), probe.agent, probe.task, probe.step, probe.path); err == nil {
+			t.Fatalf("expected rejection: %+v", probe)
+		}
+	}
+}
+
 func workspaceFixture(t *testing.T) (config.Config, *sql.DB, int64, string) {
 	t.Helper()
 	cfg, _ := config.Load(t.TempDir())

@@ -11,6 +11,7 @@ import (
 	"wanxiang-agent/server/internal/issues"
 	"wanxiang-agent/server/internal/mr"
 	"wanxiang-agent/server/internal/tasks"
+	"wanxiang-agent/server/internal/workspaces"
 )
 
 type Dependencies struct {
@@ -22,6 +23,7 @@ type Dependencies struct {
 	MR          *mr.Service
 	Issues      *issues.Service
 	Assignments *assignments.Service
+	Workspaces  *workspaces.Service
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -56,6 +58,12 @@ func NewRouter(deps Dependencies) http.Handler {
 		if deps.Assignments != nil {
 			admin.Get("/api/admin/tasks/{id}/match", handleGetTaskMatch(deps.Assignments))
 			admin.Put("/api/admin/tasks/{id}/match", handleOverrideTaskMatch(deps.Assignments))
+		}
+		if deps.Workspaces != nil {
+			admin.Get("/api/admin/tasks/{id}/workspace", handleGetTaskWorkspace(deps.Workspaces))
+			admin.Post("/api/admin/tasks/{id}/workspace/reconcile", handleReconcileTaskWorkspace(deps.Workspaces))
+			admin.Post("/api/admin/tasks/{id}/workspace/repair", handleRepairTaskWorkspace(deps.Workspaces))
+			admin.Post("/api/admin/tasks/{id}/workspace/cleanup", handleCleanupTaskWorkspace(deps.Workspaces))
 		}
 		if deps.Issues != nil {
 			admin.Post("/api/admin/issues", handleCreateIssue(deps.Issues))

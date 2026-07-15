@@ -133,7 +133,7 @@
 - [x] 写关闭测试：停止领取、通知 Worker、等待退出；超时后终止并由 M05 中断。
 - [x] 实现扫描、PID/退出状态、事件、App Start/Close 集成。
 - [x] 运行 `GOCACHE=/tmp/wanxiang-go-cache go test ./internal/executor ./internal/app -run 'Supervisor|Executor'`。
-- [ ] 提交：`功能：监管 Agent 并行任务消费`。
+- [x] 提交：`功能：监管 Agent 并行任务消费`（`8a30d47`）。
 
 ### Task 7：管理 API、低量真实 API 验收与交接
 

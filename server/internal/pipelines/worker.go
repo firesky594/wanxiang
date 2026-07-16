@@ -27,13 +27,16 @@ type Worker struct {
 	done       chan struct{}
 	once       sync.Once
 	cancel     context.CancelFunc
+	pm2Path    func(context.Context, string, string) (string, error)
 }
 
 func NewWorker(db *sql.DB, r Runner, interval time.Duration, projectDir func(int64) (string, error)) *Worker {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
-	return &Worker{db: db, runner: r, interval: interval, projectDir: projectDir, stop: make(chan struct{}), done: make(chan struct{})}
+	w := &Worker{db: db, runner: r, interval: interval, projectDir: projectDir, stop: make(chan struct{}), done: make(chan struct{})}
+	w.pm2Path = queryPM2Path
+	return w
 }
 func (w *Worker) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -62,17 +65,17 @@ func (w *Worker) Close() {
 	})
 }
 func (w *Worker) Scan(ctx context.Context) error {
-	rowsStale, _ := w.db.QueryContext(ctx, `select id,run_id,kind,timeout_seconds,started_at from pipeline_steps where status='running'`)
+	rowsStale, _ := w.db.QueryContext(ctx, `select id,run_id,kind,timeout_seconds,started_at,attempt,max_attempts from pipeline_steps where status='running'`)
 	type staleStep struct {
-		id, run       int64
-		kind, started string
-		timeout       int
+		id, run               int64
+		kind, started         string
+		timeout, attempt, max int
 	}
 	var staleSteps []staleStep
 	if rowsStale != nil {
 		for rowsStale.Next() {
 			var x staleStep
-			_ = rowsStale.Scan(&x.id, &x.run, &x.kind, &x.timeout, &x.started)
+			_ = rowsStale.Scan(&x.id, &x.run, &x.kind, &x.timeout, &x.started, &x.attempt, &x.max)
 			staleSteps = append(staleSteps, x)
 		}
 		rowsStale.Close()
@@ -83,7 +86,12 @@ func (w *Worker) Scan(ctx context.Context) error {
 			continue
 		}
 		if x.kind == "test" || x.kind == "build" {
-			_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='pending',next_retry_at=? where id=? and status='running'`, now(), x.id)
+			if x.attempt >= x.max {
+				_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='failed',failure_class='environment_failure',output_summary='worker interrupted and retry budget exhausted',completed_at=? where id=? and status='running'`, now(), x.id)
+				w.refreshRun(x.run)
+			} else {
+				_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='pending',next_retry_at=? where id=? and status='running'`, now(), x.id)
+			}
 		}
 	}
 	rowsRelease, _ := w.db.QueryContext(ctx, `select ps.id,ps.run_id,pr.safe_commit,ps.timeout_seconds,ps.started_at from pipeline_steps ps join pipeline_runs pr on pr.id=ps.run_id where ps.status='running' and ps.kind='release'`)
@@ -99,10 +107,11 @@ func (w *Worker) Scan(ctx context.Context) error {
 			}
 			_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='failed',failure_class='environment_failure',output_summary='发布状态不确定，需要人工回滚确认',completed_at=? where id=?`, now(), id)
 			_, _ = w.db.ExecContext(ctx, `insert into pipeline_rollbacks(run_id,safe_commit,status,created_at) values(?,?,'awaiting_confirmation',?) on conflict(run_id) do nothing`, run, safe, now())
+			w.refreshRun(run)
 		}
 		rowsRelease.Close()
 	}
-	_, _ = w.db.ExecContext(ctx, `update pipeline_rollbacks set status='failed',last_error='rollback worker interrupted; explicit reconfirmation required',completed_at=? where status='running' and confirmed_at<?`, now(), time.Now().UTC().Add(-10*time.Minute).Format(time.RFC3339Nano))
+	_, _ = w.db.ExecContext(ctx, `update pipeline_rollbacks set status='failed',last_error='rollback worker interrupted; explicit reconfirmation required',completed_at=? where status='running' and started_at<?`, now(), time.Now().UTC().Add(-1*time.Hour).Format(time.RFC3339Nano))
 	if err := w.scanRollbacks(ctx); err != nil {
 		return err
 	}
@@ -149,7 +158,7 @@ func (w *Worker) run(ctx context.Context, id int64) error {
 	if e != nil {
 		return w.finish(id, s, Result{FailureClass: "environment_failure", Err: e})
 	}
-	if s.Kind == "build" && s.Artifact != "" {
+	if s.Kind == "build" && s.Artifact != "" && w.runHasRelease(s.RunID) {
 		if e = w.ensureBackup(s.RunID, dir, s.Artifact); e != nil {
 			return w.finish(id, s, Result{FailureClass: "environment_failure", Err: e})
 		}
@@ -157,6 +166,13 @@ func (w *Worker) run(ctx context.Context, id int64) error {
 	if s.Kind == "release" {
 		if e = w.validateRelease(ctx, s.RunID, dir, s.Artifact); e != nil {
 			return w.finish(id, s, Result{FailureClass: "environment_failure", Err: e})
+		}
+		var artifact string
+		_ = w.db.QueryRow(`select artifact from pipeline_steps where run_id=? and kind='build'`, s.RunID).Scan(&artifact)
+		expected, pathErr := safeProjectPath(dir, artifact)
+		actual, bindErr := w.pm2Path(ctx, dir, s.Args[1])
+		if pathErr != nil || bindErr != nil || actual != expected {
+			return w.finish(id, s, Result{FailureClass: "environment_failure", Err: fmt.Errorf("pm2 executable does not match release artifact")})
 		}
 	}
 	result := w.runner.Run(ctx, dir, s)
@@ -236,7 +252,7 @@ func (w *Worker) scanRollbacks(ctx context.Context) error {
 	}
 	rows.Close()
 	for _, x := range items {
-		claim, _ := w.db.ExecContext(ctx, `update pipeline_rollbacks set status='running' where id=? and status='pending'`, x.id)
+		claim, _ := w.db.ExecContext(ctx, `update pipeline_rollbacks set status='running',started_at=? where id=? and status='pending'`, now(), x.id)
 		n, _ := claim.RowsAffected()
 		if n != 1 {
 			continue
@@ -257,6 +273,13 @@ func (w *Worker) scanRollbacks(ctx context.Context) error {
 				e = restoreBackup(dir, artifact, backupPath, backupHash)
 			}
 			if e == nil {
+				expected, pathErr := safeProjectPath(dir, artifact)
+				actual, bindErr := w.pm2Path(ctx, dir, s.Args[1])
+				if pathErr != nil || bindErr != nil || actual != expected {
+					e = fmt.Errorf("pm2 executable does not match rollback artifact")
+				}
+			}
+			if e == nil {
 				r := w.runner.Run(ctx, dir, s)
 				e = r.Err
 			}
@@ -273,6 +296,41 @@ func (w *Worker) scanRollbacks(ctx context.Context) error {
 	return nil
 }
 
+func (w *Worker) runHasRelease(runID int64) bool {
+	var n int
+	_ = w.db.QueryRow(`select count(*) from pipeline_steps where run_id=? and kind='release'`, runID).Scan(&n)
+	return n == 1
+}
+
+func queryPM2Path(ctx context.Context, dir, app string) (string, error) {
+	cmd := exec.CommandContext(ctx, "pm2", "jlist")
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir()}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("pm2 binding unavailable")
+	}
+	var items []struct {
+		Name string `json:"name"`
+		Env  struct {
+			ExecPath string `json:"pm_exec_path"`
+		} `json:"pm2_env"`
+	}
+	if json.Unmarshal(out, &items) != nil {
+		return "", fmt.Errorf("pm2 binding invalid")
+	}
+	for _, item := range items {
+		if item.Name == app {
+			p, err := filepath.EvalSymlinks(item.Env.ExecPath)
+			if err != nil {
+				return "", err
+			}
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("pm2 app not found")
+}
+
 func (w *Worker) ensureBackup(runID int64, dir, artifact string) error {
 	var existing string
 	if err := w.db.QueryRow(`select backup_path from pipeline_runs where id=?`, runID).Scan(&existing); err != nil || existing != "" {
@@ -286,6 +344,14 @@ func (w *Worker) ensureBackup(runID int64, dir, artifact string) error {
 		return fmt.Errorf("existing deployment artifact required: %w", err)
 	}
 	dst := filepath.Join(filepath.Dir(dir), ".wanxiang-release-backups", filepath.Base(dir), fmt.Sprint(runID))
+	if _, statErr := os.Lstat(dst); statErr == nil {
+		hash, hashErr := hashArtifact(dst)
+		if hashErr != nil {
+			return hashErr
+		}
+		_, err = w.db.Exec(`update pipeline_runs set backup_path=?,backup_hash=? where id=? and backup_path=''`, dst, hash, runID)
+		return err
+	}
 	if err = copyArtifact(src, dst); err != nil {
 		return err
 	}

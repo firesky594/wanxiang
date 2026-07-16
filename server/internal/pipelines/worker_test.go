@@ -100,6 +100,7 @@ func TestConfirmedRollbackRestoresSafeCommitAndRestartsRelease(t *testing.T) {
 	}
 	fake := &fakeRunner{results: []Result{{}}}
 	w := NewWorker(db, fake, time.Hour, func(int64) (string, error) { return dir, nil })
+	w.pm2Path = func(context.Context, string, string) (string, error) { return filepath.Join(dir, "app.bin"), nil }
 	if e := w.Scan(t.Context()); e != nil {
 		t.Fatal(e)
 	}

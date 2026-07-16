@@ -34,6 +34,7 @@ func LoadDefinition(projectDir string) (Definition, error) {
 func Validate(d Definition) error {
 	seen := map[string]bool{}
 	buildArtifact := ""
+	buildCount, releaseCount := 0, 0
 	if len(d.Steps) == 0 || len(d.Steps) > 32 {
 		return ErrInvalidDefinition
 	}
@@ -55,6 +56,7 @@ func Validate(d Definition) error {
 			}
 		}
 		if s.Kind == "build" {
+			buildCount++
 			if s.Artifact != "" {
 				buildArtifact = s.Artifact
 			}
@@ -62,9 +64,15 @@ func Validate(d Definition) error {
 		if s.Kind == "release" && (buildArtifact == "" || !validHealthURL(s.HealthURL)) {
 			return ErrInvalidDefinition
 		}
+		if s.Kind == "release" {
+			releaseCount++
+		}
 		if s.Kind == "migration" || s.Kind == "delete" {
 			return ErrInvalidDefinition
 		}
+	}
+	if buildCount > 1 || releaseCount > 1 {
+		return ErrInvalidDefinition
 	}
 	return nil
 }

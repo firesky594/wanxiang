@@ -38,3 +38,13 @@ func TestValidateRejectsUniversalExecutionAndSecretArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRejectsAmbiguousMultipleBuildArtifacts(t *testing.T) {
+	build := func(id, artifact string) StepDefinition {
+		return StepDefinition{ID: id, Kind: "build", Command: "go", Args: []string{"build", "./..."}, Artifact: artifact, TimeoutSeconds: 30, MaxAttempts: 1, Reversible: true}
+	}
+	d := Definition{Steps: []StepDefinition{build("one", "one.bin"), build("two", "two.bin"), {ID: "release", Kind: "release", Command: "pm2", Args: []string{"restart", "app"}, HealthURL: "http://127.0.0.1:30188/api/health", TimeoutSeconds: 30, MaxAttempts: 1, Reversible: true}}}
+	if Validate(d) == nil {
+		t.Fatal("multiple build artifacts accepted")
+	}
+}

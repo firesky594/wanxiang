@@ -9,10 +9,14 @@ import (
 )
 
 var safeID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
-var allowed = map[string]bool{"go": true, "npm": true, "pnpm": true, "node": true, "pm2": true}
 
 func LoadDefinition(projectDir string) (Definition, error) {
-	raw, err := os.ReadFile(filepath.Join(projectDir, ".wanxiang", "pipeline.json"))
+	path := filepath.Join(projectDir, ".wanxiang", "pipeline.json")
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return Definition{}, ErrInvalidDefinition
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Definition{}, err
 	}
@@ -28,24 +32,55 @@ func Validate(d Definition) error {
 		return ErrInvalidDefinition
 	}
 	for _, s := range d.Steps {
-		if !safeID.MatchString(s.ID) || seen[s.ID] || !allowed[s.Command] || s.TimeoutSeconds < 1 || s.TimeoutSeconds > 3600 || s.MaxAttempts < 1 || s.MaxAttempts > 5 {
+		if !safeID.MatchString(s.ID) || seen[s.ID] || !allowedStep(s) || s.TimeoutSeconds < 1 || s.TimeoutSeconds > 3600 || s.MaxAttempts < 1 || s.MaxAttempts > 5 {
 			return ErrInvalidDefinition
 		}
 		seen[s.ID] = true
-		if s.Kind != "test" && s.Kind != "build" && s.Kind != "release" && s.Kind != "migration" && s.Kind != "delete" {
-			return ErrInvalidDefinition
-		}
 		for _, a := range s.Args {
 			clean := filepath.Clean(a)
 			if a == "" || strings.ContainsAny(a, "\n\r\x00|;&`$><") || filepath.IsAbs(a) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 				return ErrInvalidDefinition
 			}
 		}
-		if (s.Kind == "release" || s.Kind == "migration" || s.Kind == "delete") && s.Reversible && s.Kind != "release" {
+		if s.Artifact != "" {
+			clean := filepath.Clean(s.Artifact)
+			if filepath.IsAbs(s.Artifact) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return ErrInvalidDefinition
+			}
+		}
+		if s.Kind == "migration" || s.Kind == "delete" {
 			return ErrInvalidDefinition
 		}
 	}
 	return nil
+}
+func allowedStep(s StepDefinition) bool {
+	switch s.Kind {
+	case "test":
+		return (s.Command == "go" && len(s.Args) >= 2 && s.Args[0] == "test" && safeGoArgs(s.Args[1:])) || ((s.Command == "npm" || s.Command == "pnpm") && safeNPMTestArgs(s.Args))
+	case "build":
+		return (s.Command == "go" && len(s.Args) >= 2 && s.Args[0] == "build" && safeGoArgs(s.Args[1:])) || ((s.Command == "npm" || s.Command == "pnpm") && len(s.Args) == 2 && s.Args[0] == "run" && s.Args[1] == "build")
+	case "release":
+		return s.Command == "pm2" && len(s.Args) == 2 && s.Args[0] == "restart" && safeID.MatchString(s.Args[1]) && s.Reversible
+	}
+	return false
+}
+
+var safePackage = regexp.MustCompile(`^(\./\.\.\.|\./[A-Za-z0-9_./-]*|[A-Za-z0-9_./-]+|-count=[1-9][0-9]*|-timeout=[1-9][0-9]*s|-buildvcs=false)$`)
+
+func safeGoArgs(args []string) bool {
+	for _, a := range args {
+		if !safePackage.MatchString(a) {
+			return false
+		}
+	}
+	return true
+}
+func safeNPMTestArgs(args []string) bool {
+	if len(args) == 1 {
+		return args[0] == "test"
+	}
+	return len(args) == 3 && args[0] == "test" && args[1] == "--" && args[2] == "--run"
 }
 func requiresConfirmation(kind string) bool {
 	return kind == "release" || kind == "migration" || kind == "delete"

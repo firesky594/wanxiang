@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -20,13 +21,14 @@ type Runner interface {
 type CommandRunner struct{}
 
 func (CommandRunner) Run(ctx context.Context, dir string, s Step) Result {
-	if !allowed[s.Command] {
+	if !allowedStep(StepDefinition{ID: s.Key, Kind: s.Kind, Command: s.Command, Args: s.Args, TimeoutSeconds: s.TimeoutSeconds, MaxAttempts: s.MaxAttempts, Reversible: s.Reversible}) {
 		return Result{FailureClass: "permission_blocked", Err: ErrInvalidDefinition}
 	}
 	cctx, cancel := context.WithTimeout(ctx, time.Duration(s.TimeoutSeconds)*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, s.Command, s.Args...)
 	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir(), "TMPDIR=" + os.TempDir(), "LANG=C.UTF-8"}
 	var b bytes.Buffer
 	cmd.Stdout = &b
 	cmd.Stderr = &b

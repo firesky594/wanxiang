@@ -107,6 +107,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			admin.Get("/api/admin/pipelines/{id}", handleGetPipeline(deps.Pipelines))
 			admin.Post("/api/admin/projects/{id}/pipelines", handleStartPipeline(deps.DB, deps.Pipelines))
 			admin.Post("/api/admin/pipelines/{id}/steps/{step}/confirm", handleConfirmPipeline(deps.Pipelines))
+			admin.Post("/api/admin/pipelines/{id}/rollback/confirm", handleConfirmRollback(deps.Pipelines))
 		}
 	})
 	r.Group(func(agent chi.Router) {

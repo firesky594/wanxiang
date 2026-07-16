@@ -337,8 +337,9 @@ export async function listDeliveries():Promise<DeliverySnapshot[]>{const respons
 export async function getDelivery(id:number):Promise<DeliveryDetail>{const response=await api<{ok:boolean;detail:DeliveryDetail}>(`/api/admin/deliveries/${id}`);return response.detail}
 export async function decideDelivery(id:number,input:{decision:'accepted'|'rejected'|'revision_requested';comment:string;idempotency_key:string}){const response=await api<{ok:boolean;result:{decision:AcceptanceDecision;rework_round?:ReworkRound;task_status:string}}>(`/api/admin/deliveries/${id}/decisions`,{method:'POST',body:JSON.stringify(input)});return response.result}
 export interface PipelineStep {ID:number;RunID:number;Key:string;Kind:string;Command:string;Status:string;FailureClass:string;OutputSummary:string;ConfirmedBy:string;Args:string[];TimeoutSeconds:number;MaxAttempts:number;Attempt:number;Reversible:boolean}
-export interface PipelineRun {ID:number;ProjectID:number;TaskID?:number;Status:string;SafeCommit:string;ArtifactHash:string;DefinitionHash:string;RequestedBy:string;CreatedAt:string;LastError:string;Steps:PipelineStep[]}
+export interface PipelineRun {ID:number;ProjectID:number;TaskID?:number;Status:string;SafeCommit:string;ArtifactHash:string;DefinitionHash:string;RequestedBy:string;CreatedAt:string;LastError:string;RollbackStatus:string;Steps:PipelineStep[]}
 export const listPipelines=()=>api<PipelineRun[]>('/api/admin/pipelines')
 export const getPipeline=(id:number)=>api<PipelineRun>(`/api/admin/pipelines/${id}`)
 export const startPipeline=(project:number,task_id?:number)=>api<PipelineRun>(`/api/admin/projects/${project}/pipelines`,{method:'POST',body:JSON.stringify({task_id,idempotency_key:crypto.randomUUID()})})
 export const confirmPipeline=(run:number,step:string)=>api<PipelineStep>(`/api/admin/pipelines/${run}/steps/${step}/confirm`,{method:'POST'})
+export const confirmPipelineRollback=(run:number)=>api<{ok:boolean}>(`/api/admin/pipelines/${run}/rollback/confirm`,{method:'POST'})

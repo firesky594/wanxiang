@@ -31,3 +31,10 @@ func TestLoadDefinitionRejectsShellAndEscape(t *testing.T) {
 		t.Fatal("unsafe accepted")
 	}
 }
+func TestValidateRejectsUniversalExecutionAndSecretArguments(t *testing.T) {
+	for _, s := range []StepDefinition{{ID: "x", Kind: "test", Command: "node", Args: []string{"-e", "process.exit()"}, TimeoutSeconds: 1, MaxAttempts: 1, Reversible: true}, {ID: "x", Kind: "test", Command: "npm", Args: []string{"exec", "evil"}, TimeoutSeconds: 1, MaxAttempts: 1, Reversible: true}, {ID: "x", Kind: "test", Command: "go", Args: []string{"run", "./evil.go"}, TimeoutSeconds: 1, MaxAttempts: 1, Reversible: true}, {ID: "x", Kind: "test", Command: "go", Args: []string{"test", "./...", "--token=secret"}, TimeoutSeconds: 1, MaxAttempts: 1, Reversible: true}, {ID: "x", Kind: "test", Command: "pm2", Args: []string{"kill"}, TimeoutSeconds: 1, MaxAttempts: 1, Reversible: true}} {
+		if Validate(Definition{Steps: []StepDefinition{s}}) == nil {
+			t.Fatalf("accepted %+v", s)
+		}
+	}
+}

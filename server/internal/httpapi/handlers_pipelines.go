@@ -6,6 +6,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strconv"
+	"strings"
+	"wanxiang-agent/server/internal/gitx"
 	"wanxiang-agent/server/internal/pipelines"
 )
 
@@ -52,9 +54,29 @@ func handleStartPipeline(db *sql.DB, s *pipelines.Service) http.HandlerFunc {
 			pipelineError(w, 400, "invalid body")
 			return
 		}
-		var dir, commit string
-		if e = db.QueryRowContext(r.Context(), `select dir,coalesce(main_commit,'') from projects where id=?`, project).Scan(&dir, &commit); e != nil {
+		var dir, recorded string
+		if e = db.QueryRowContext(r.Context(), `select dir,coalesce(main_commit,'') from projects where id=?`, project).Scan(&dir, &recorded); e != nil {
 			pipelineError(w, 404, "project not found")
+			return
+		}
+		branch, e := gitx.Run(r.Context(), dir, "branch", "--show-current")
+		if e != nil || strings.TrimSpace(branch) != "main" {
+			pipelineError(w, 409, "project must be on main")
+			return
+		}
+		status, e := gitx.Run(r.Context(), dir, "status", "--porcelain")
+		if e != nil || strings.TrimSpace(status) != "" {
+			pipelineError(w, 409, "project must be clean")
+			return
+		}
+		head, e := gitx.Run(r.Context(), dir, "rev-parse", "HEAD")
+		if e != nil {
+			pipelineError(w, 409, "project commit unavailable")
+			return
+		}
+		commit := strings.TrimSpace(head)
+		if recorded != "" && recorded != commit {
+			pipelineError(w, 409, "project commit drifted")
 			return
 		}
 		d, e := pipelines.LoadDefinition(dir)
@@ -83,5 +105,19 @@ func handleConfirmPipeline(s *pipelines.Service) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, 200, x)
+	}
+}
+func handleConfirmRollback(s *pipelines.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, e := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if e != nil {
+			pipelineError(w, 400, "invalid id")
+			return
+		}
+		if e = s.ConfirmRollback(r.Context(), id, "admin"); e != nil {
+			pipelineError(w, 409, e.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"ok": true})
 	}
 }

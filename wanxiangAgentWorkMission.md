@@ -541,7 +541,7 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 mission: M08
 phase: completed_pending_deploy
 branch: feat/mission-08
-checkpoint_commit: 3dbfab7
+checkpoint_commit: 4f820c4
 completed:
   - 已核对 M08 规范、M07 manager 通知和现有任务状态机
   - 已确认采用版本化交付快照方案
@@ -555,6 +555,10 @@ completed:
   - 已通过代码审查并修复通知与返工并发 claim、崩溃恢复、最终 main commit 审计关系
   - 已补齐工作包、审核、用户决定、高风险证据聚合和广义敏感字段脱密
   - 已将幂等键绑定快照、决定、意见与管理员身份，并防止任务和快照状态分裂
+  - 已按复审修复返工 plan_version 在 assignment、负责人、workspace 和 MR 授权中的完整作用域
+  - 已增加 step ID 分支隔离、旧 workspace 历史保护和旧版 team_decisions 生产迁移测试
+  - 已补齐返工来源快照上下文、Provider 临时错误退避恢复、快照事务白名单和凭据格式脱敏
+  - 已统一验收内容与 Worker 持久错误的凭据脱敏规则，覆盖 Authorization、JWT、AWS Key 和 URL access token
 tests:
   - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/db
     result: passed
@@ -568,6 +572,8 @@ tests:
     result: all packages passed after review fixes
   - command: GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m08 ./cmd/wanxiang
     result: passed
+  - command: 独立代码复审 main..4f820c4
+    result: 原 8 项问题、复审 3 项 Important 和最终持久错误脱敏项均已处理；未发现 Critical
 blockers: []
 frontend_build_required: true
 frontend_build_result: passed, 6 files and 15 tests passed

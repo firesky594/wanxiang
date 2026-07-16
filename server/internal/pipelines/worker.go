@@ -303,9 +303,13 @@ func (w *Worker) runHasRelease(runID int64) bool {
 }
 
 func queryPM2Path(ctx context.Context, dir, app string) (string, error) {
+	pm2Home, err := trustedPM2Home()
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, "pm2", "jlist")
 	cmd.Dir = dir
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir()}
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir(), "PM2_HOME=" + pm2Home}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("pm2 binding unavailable")
@@ -332,8 +336,8 @@ func queryPM2Path(ctx context.Context, dir, app string) (string, error) {
 }
 
 func (w *Worker) ensureBackup(runID int64, dir, artifact string) error {
-	var existing string
-	if err := w.db.QueryRow(`select backup_path from pipeline_runs where id=?`, runID).Scan(&existing); err != nil || existing != "" {
+	var existing, expectedHash string
+	if err := w.db.QueryRow(`select backup_path,backup_hash from pipeline_runs where id=?`, runID).Scan(&existing, &expectedHash); err != nil || existing != "" {
 		return err
 	}
 	src, err := safeProjectPath(dir, artifact)
@@ -343,23 +347,43 @@ func (w *Worker) ensureBackup(runID int64, dir, artifact string) error {
 	if _, err = os.Lstat(src); err != nil {
 		return fmt.Errorf("existing deployment artifact required: %w", err)
 	}
-	dst := filepath.Join(filepath.Dir(dir), ".wanxiang-release-backups", filepath.Base(dir), fmt.Sprint(runID))
-	if _, statErr := os.Lstat(dst); statErr == nil {
-		hash, hashErr := hashArtifact(dst)
-		if hashErr != nil {
-			return hashErr
-		}
-		_, err = w.db.Exec(`update pipeline_runs set backup_path=?,backup_hash=? where id=? and backup_path=''`, dst, hash, runID)
-		return err
-	}
-	if err = copyArtifact(src, dst); err != nil {
-		return err
-	}
-	hash, err := hashArtifact(dst)
+	sourceHash, err := hashArtifact(src)
 	if err != nil {
 		return err
 	}
-	_, err = w.db.Exec(`update pipeline_runs set backup_path=?,backup_hash=? where id=? and backup_path=''`, dst, hash, runID)
+	if expectedHash == "" {
+		if _, err = w.db.Exec(`update pipeline_runs set backup_hash=? where id=? and backup_hash=''`, sourceHash, runID); err != nil {
+			return err
+		}
+		expectedHash = sourceHash
+	}
+	if expectedHash != sourceHash {
+		return fmt.Errorf("deployment artifact changed during backup")
+	}
+	dst := filepath.Join(filepath.Dir(dir), ".wanxiang-release-backups", filepath.Base(dir), fmt.Sprint(runID))
+	if _, statErr := os.Lstat(dst); statErr == nil {
+		hash, hashErr := hashArtifact(dst)
+		if hashErr == nil && hash == expectedHash {
+			_, err = w.db.Exec(`update pipeline_runs set backup_path=? where id=? and backup_path=''`, dst, runID)
+			return err
+		}
+		if err = os.RemoveAll(dst); err != nil {
+			return err
+		}
+	}
+	tmp := dst + ".partial"
+	_ = os.RemoveAll(tmp)
+	if err = copyArtifact(src, tmp); err != nil {
+		return err
+	}
+	hash, err := hashArtifact(tmp)
+	if err != nil || hash != expectedHash {
+		return fmt.Errorf("backup verification failed")
+	}
+	if err = os.Rename(tmp, dst); err != nil {
+		return err
+	}
+	_, err = w.db.Exec(`update pipeline_runs set backup_path=? where id=? and backup_path=''`, dst, runID)
 	return err
 }
 

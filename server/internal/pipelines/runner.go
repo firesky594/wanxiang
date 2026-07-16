@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -29,6 +30,13 @@ func (CommandRunner) Run(ctx context.Context, dir string, s Step) Result {
 	cmd := exec.CommandContext(cctx, s.Command, s.Args...)
 	cmd.Dir = dir
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir(), "TMPDIR=" + os.TempDir(), "LANG=C.UTF-8"}
+	if s.Command == "pm2" {
+		pm2Home, err := trustedPM2Home()
+		if err != nil {
+			return Result{FailureClass: "environment_failure", Err: err}
+		}
+		cmd.Env = append(cmd.Env, "PM2_HOME="+pm2Home)
+	}
 	var b bytes.Buffer
 	cmd.Stdout = &b
 	cmd.Stderr = &b
@@ -46,6 +54,18 @@ func (CommandRunner) Run(ctx context.Context, dir string, s Step) Result {
 		class = "environment_failure"
 	}
 	return Result{Output: out, FailureClass: class, Err: e}
+}
+
+func trustedPM2Home() (string, error) {
+	home := os.Getenv("WANXIANG_PM2_HOME")
+	if !filepath.IsAbs(home) {
+		return "", errors.New("WANXIANG_PM2_HOME must be an absolute path")
+	}
+	info, err := os.Stat(home)
+	if err != nil || !info.IsDir() {
+		return "", errors.New("WANXIANG_PM2_HOME unavailable")
+	}
+	return home, nil
 }
 func redact(v string) string {
 	lower := strings.ToLower(v)

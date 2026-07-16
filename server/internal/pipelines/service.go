@@ -21,7 +21,7 @@ func (s *Service) Start(ctx context.Context, in StartInput) (Run, error) {
 	sum := sha256.Sum256(raw)
 	fingerprint := hex.EncodeToString(sum[:])
 	if r, e := s.byKey(ctx, in.IdempotencyKey); e == nil {
-		if r.ProjectID != in.ProjectID || r.DefinitionHash != fingerprint || r.RequestedBy != in.RequestedBy {
+		if r.ProjectID != in.ProjectID || r.DefinitionHash != fingerprint || r.RequestedBy != in.RequestedBy || !sameTask(r.TaskID, in.TaskID) {
 			return Run{}, errors.New("idempotency_conflict")
 		}
 		return r, nil
@@ -34,7 +34,7 @@ func (s *Service) Start(ctx context.Context, in StartInput) (Run, error) {
 	defer tx.Rollback()
 	res, e := tx.ExecContext(ctx, `insert into pipeline_runs(project_id,task_id,definition_json,definition_hash,status,safe_commit,idempotency_key,requested_by,created_at) values(?,?,?,?, 'pending',?,?,?,?)`, in.ProjectID, in.TaskID, string(raw), fingerprint, in.SafeCommit, in.IdempotencyKey, in.RequestedBy, now)
 	if e != nil {
-		if r, findErr := s.byKey(ctx, in.IdempotencyKey); findErr == nil && r.ProjectID == in.ProjectID && r.DefinitionHash == fingerprint && r.RequestedBy == in.RequestedBy {
+		if r, findErr := s.byKey(ctx, in.IdempotencyKey); findErr == nil && r.ProjectID == in.ProjectID && r.DefinitionHash == fingerprint && r.RequestedBy == in.RequestedBy && sameTask(r.TaskID, in.TaskID) {
 			return r, nil
 		}
 		return Run{}, e
@@ -46,7 +46,7 @@ func (s *Service) Start(ctx context.Context, in StartInput) (Run, error) {
 		if requiresConfirmation(st.Kind) {
 			status = "awaiting_confirmation"
 		}
-		_, e = tx.ExecContext(ctx, `insert into pipeline_steps(run_id,step_key,kind,command,args_json,artifact,timeout_seconds,max_attempts,reversible,status) values(?,?,?,?,?,?,?,?,?,?)`, id, st.ID, st.Kind, st.Command, string(args), st.Artifact, st.TimeoutSeconds, st.MaxAttempts, boolInt(st.Reversible), status)
+		_, e = tx.ExecContext(ctx, `insert into pipeline_steps(run_id,step_key,kind,command,args_json,artifact,health_url,timeout_seconds,max_attempts,reversible,status) values(?,?,?,?,?,?,?,?,?,?,?)`, id, st.ID, st.Kind, st.Command, string(args), st.Artifact, st.HealthURL, st.TimeoutSeconds, st.MaxAttempts, boolInt(st.Reversible), status)
 		if e != nil {
 			return Run{}, e
 		}
@@ -66,6 +66,10 @@ func (s *Service) Confirm(ctx context.Context, runID int64, stepKey, actor strin
 	}
 	n, _ := res.RowsAffected()
 	if n != 1 {
+		existing, err := s.getStep(ctx, runID, stepKey)
+		if err == nil && existing.ConfirmedBy == actor {
+			return existing, nil
+		}
 		return Step{}, ErrConfirmationRequired
 	}
 	return s.getStep(ctx, runID, stepKey)
@@ -74,12 +78,16 @@ func (s *Service) ConfirmRollback(ctx context.Context, runID int64, actor string
 	if actor == "" {
 		return ErrConfirmationRequired
 	}
-	res, err := s.db.ExecContext(ctx, `update pipeline_rollbacks set status='pending',confirmed_by=?,confirmed_at=? where run_id=? and status='awaiting_confirmation'`, actor, time.Now().UTC().Format(time.RFC3339Nano), runID)
+	res, err := s.db.ExecContext(ctx, `update pipeline_rollbacks set status='pending',confirmed_by=?,confirmed_at=?,last_error='' where run_id=? and status in ('awaiting_confirmation','failed')`, actor, time.Now().UTC().Format(time.RFC3339Nano), runID)
 	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n != 1 {
+		var confirmed string
+		if err = s.db.QueryRowContext(ctx, `select confirmed_by from pipeline_rollbacks where run_id=?`, runID).Scan(&confirmed); err == nil && confirmed == actor {
+			return nil
+		}
 		return ErrConfirmationRequired
 	}
 	return nil
@@ -87,7 +95,7 @@ func (s *Service) ConfirmRollback(ctx context.Context, runID int64, actor string
 func (s *Service) Get(ctx context.Context, id int64) (Run, error) {
 	var r Run
 	var task sql.NullInt64
-	e := s.db.QueryRowContext(ctx, `select id,project_id,task_id,status,safe_commit,artifact_hash,definition_hash,requested_by,created_at,last_error from pipeline_runs where id=?`, id).Scan(&r.ID, &r.ProjectID, &task, &r.Status, &r.SafeCommit, &r.ArtifactHash, &r.DefinitionHash, &r.RequestedBy, &r.CreatedAt, &r.LastError)
+	e := s.db.QueryRowContext(ctx, `select id,project_id,task_id,status,safe_commit,artifact_hash,backup_path,backup_hash,definition_hash,requested_by,created_at,last_error from pipeline_runs where id=?`, id).Scan(&r.ID, &r.ProjectID, &task, &r.Status, &r.SafeCommit, &r.ArtifactHash, &r.BackupPath, &r.BackupHash, &r.DefinitionHash, &r.RequestedBy, &r.CreatedAt, &r.LastError)
 	if errors.Is(e, sql.ErrNoRows) {
 		return Run{}, ErrNotFound
 	}
@@ -98,7 +106,7 @@ func (s *Service) Get(ctx context.Context, id int64) (Run, error) {
 		r.TaskID = &task.Int64
 	}
 	_ = s.db.QueryRowContext(ctx, `select status from pipeline_rollbacks where run_id=?`, id).Scan(&r.RollbackStatus)
-	rows, e := s.db.QueryContext(ctx, `select id,run_id,step_key,kind,command,args_json,artifact,timeout_seconds,max_attempts,reversible,status,attempt,failure_class,output_summary,confirmed_by from pipeline_steps where run_id=? order by id`, id)
+	rows, e := s.db.QueryContext(ctx, `select id,run_id,step_key,kind,command,args_json,artifact,health_url,timeout_seconds,max_attempts,reversible,status,attempt,failure_class,output_summary,confirmed_by from pipeline_steps where run_id=? order by id`, id)
 	if e != nil {
 		return Run{}, e
 	}
@@ -107,7 +115,7 @@ func (s *Service) Get(ctx context.Context, id int64) (Run, error) {
 		var x Step
 		var args string
 		var rev int
-		if e = rows.Scan(&x.ID, &x.RunID, &x.Key, &x.Kind, &x.Command, &args, &x.Artifact, &x.TimeoutSeconds, &x.MaxAttempts, &rev, &x.Status, &x.Attempt, &x.FailureClass, &x.OutputSummary, &x.ConfirmedBy); e != nil {
+		if e = rows.Scan(&x.ID, &x.RunID, &x.Key, &x.Kind, &x.Command, &args, &x.Artifact, &x.HealthURL, &x.TimeoutSeconds, &x.MaxAttempts, &rev, &x.Status, &x.Attempt, &x.FailureClass, &x.OutputSummary, &x.ConfirmedBy); e != nil {
 			return Run{}, e
 		}
 		x.Reversible = rev == 1
@@ -159,3 +167,5 @@ func boolInt(v bool) int {
 	}
 	return 0
 }
+
+func sameTask(a, b *int64) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }

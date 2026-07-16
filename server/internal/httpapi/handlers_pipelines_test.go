@@ -28,7 +28,7 @@ func TestPipelineAdminAPIAuthStartAndConfirmation(t *testing.T) {
 	git("config", "user.email", "test@example.com")
 	git("config", "user.name", "test")
 	_ = os.MkdirAll(filepath.Join(dir, ".wanxiang"), 0755)
-	_ = os.WriteFile(filepath.Join(dir, ".wanxiang", "pipeline.json"), []byte(`{"steps":[{"id":"release","kind":"release","command":"pm2","args":["restart","demo"],"timeout_seconds":5,"max_attempts":1,"reversible":true}]}`), 0644)
+	_ = os.WriteFile(filepath.Join(dir, ".wanxiang", "pipeline.json"), []byte(`{"steps":[{"id":"build","kind":"build","command":"go","args":["build","./..."],"artifact":"app.bin","timeout_seconds":5,"max_attempts":1,"reversible":true},{"id":"release","kind":"release","command":"pm2","args":["restart","demo"],"health_url":"http://127.0.0.1:30188/api/health","timeout_seconds":5,"max_attempts":1,"reversible":true}]}`), 0644)
 	git("add", ".")
 	git("commit", "-m", "init")
 	head := git("rev-parse", "HEAD")

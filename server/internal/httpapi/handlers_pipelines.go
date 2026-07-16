@@ -18,7 +18,7 @@ func handleListPipelines(s *pipelines.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		items, e := s.List(r.Context())
 		if e != nil {
-			pipelineError(w, 500, e.Error())
+			pipelineError(w, 500, "pipeline query failed")
 			return
 		}
 		writeJSON(w, 200, items)
@@ -33,7 +33,7 @@ func handleGetPipeline(s *pipelines.Service) http.HandlerFunc {
 		}
 		x, e := s.Get(r.Context(), id)
 		if e != nil {
-			pipelineError(w, 404, e.Error())
+			pipelineError(w, 404, "pipeline not found")
 			return
 		}
 		writeJSON(w, 200, x)
@@ -81,12 +81,13 @@ func handleStartPipeline(db *sql.DB, s *pipelines.Service) http.HandlerFunc {
 		}
 		d, e := pipelines.LoadDefinition(dir)
 		if e != nil {
-			pipelineError(w, 409, e.Error())
+			pipelineError(w, 409, "pipeline definition unavailable")
 			return
 		}
-		run, e := s.Start(r.Context(), pipelines.StartInput{ProjectID: project, TaskID: in.TaskID, Definition: d, SafeCommit: commit, IdempotencyKey: in.IdempotencyKey, RequestedBy: "admin"})
+		actor, _ := AdminIdentity(r.Context())
+		run, e := s.Start(r.Context(), pipelines.StartInput{ProjectID: project, TaskID: in.TaskID, Definition: d, SafeCommit: commit, IdempotencyKey: in.IdempotencyKey, RequestedBy: actor})
 		if e != nil {
-			pipelineError(w, 409, e.Error())
+			pipelineError(w, 409, "pipeline start conflict")
 			return
 		}
 		writeJSON(w, 201, run)
@@ -99,9 +100,10 @@ func handleConfirmPipeline(s *pipelines.Service) http.HandlerFunc {
 			pipelineError(w, 400, "invalid id")
 			return
 		}
-		x, e := s.Confirm(r.Context(), id, chi.URLParam(r, "step"), "admin")
+		actor, _ := AdminIdentity(r.Context())
+		x, e := s.Confirm(r.Context(), id, chi.URLParam(r, "step"), actor)
 		if e != nil {
-			pipelineError(w, 409, e.Error())
+			pipelineError(w, 409, "pipeline confirmation conflict")
 			return
 		}
 		writeJSON(w, 200, x)
@@ -114,8 +116,9 @@ func handleConfirmRollback(s *pipelines.Service) http.HandlerFunc {
 			pipelineError(w, 400, "invalid id")
 			return
 		}
-		if e = s.ConfirmRollback(r.Context(), id, "admin"); e != nil {
-			pipelineError(w, 409, e.Error())
+		actor, _ := AdminIdentity(r.Context())
+		if e = s.ConfirmRollback(r.Context(), id, actor); e != nil {
+			pipelineError(w, 409, "rollback confirmation conflict")
 			return
 		}
 		writeJSON(w, 200, map[string]bool{"ok": true})

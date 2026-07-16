@@ -10,9 +10,9 @@ import (
 func TestDefinitionAndStartAreStrictIdempotentAndConfirmRelease(t *testing.T) {
 	db := testutil.OpenDB(t)
 	svc := NewService(db)
-	d := Definition{Steps: []StepDefinition{{ID: "test", Kind: "test", Command: "go", Args: []string{"test", "./..."}, TimeoutSeconds: 30, MaxAttempts: 2, Reversible: true}, {ID: "release", Kind: "release", Command: "pm2", Args: []string{"restart", "app"}, TimeoutSeconds: 30, MaxAttempts: 1, Reversible: true}}}
+	d := Definition{Steps: []StepDefinition{{ID: "test", Kind: "test", Command: "go", Args: []string{"test", "./..."}, TimeoutSeconds: 30, MaxAttempts: 2, Reversible: true}, {ID: "build", Kind: "build", Command: "go", Args: []string{"build", "./..."}, Artifact: "app.bin", TimeoutSeconds: 30, MaxAttempts: 1, Reversible: true}, {ID: "release", Kind: "release", Command: "pm2", Args: []string{"restart", "app"}, HealthURL: "http://127.0.0.1:30188/api/health", TimeoutSeconds: 30, MaxAttempts: 1, Reversible: true}}}
 	r, e := svc.Start(t.Context(), StartInput{ProjectID: 1, Definition: d, SafeCommit: "abc", IdempotencyKey: "one", RequestedBy: "admin"})
-	if e != nil || len(r.Steps) != 2 || r.Steps[1].Status != "awaiting_confirmation" {
+	if e != nil || len(r.Steps) != 3 || r.Steps[2].Status != "awaiting_confirmation" {
 		t.Fatalf("%+v %v", r, e)
 	}
 	again, _ := svc.Start(t.Context(), StartInput{ProjectID: 1, Definition: d, IdempotencyKey: "one", RequestedBy: "admin"})

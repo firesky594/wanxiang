@@ -5,7 +5,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,19 +62,47 @@ func (w *Worker) Close() {
 	})
 }
 func (w *Worker) Scan(ctx context.Context) error {
-	stale := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano)
-	_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='pending',next_retry_at=? where status='running' and kind in ('test','build') and started_at<?`, now(), stale)
-	rowsRelease, _ := w.db.QueryContext(ctx, `select ps.id,ps.run_id,pr.safe_commit from pipeline_steps ps join pipeline_runs pr on pr.id=ps.run_id where ps.status='running' and ps.kind='release' and ps.started_at<?`, stale)
+	rowsStale, _ := w.db.QueryContext(ctx, `select id,run_id,kind,timeout_seconds,started_at from pipeline_steps where status='running'`)
+	type staleStep struct {
+		id, run       int64
+		kind, started string
+		timeout       int
+	}
+	var staleSteps []staleStep
+	if rowsStale != nil {
+		for rowsStale.Next() {
+			var x staleStep
+			_ = rowsStale.Scan(&x.id, &x.run, &x.kind, &x.timeout, &x.started)
+			staleSteps = append(staleSteps, x)
+		}
+		rowsStale.Close()
+	}
+	for _, x := range staleSteps {
+		started, err := time.Parse(time.RFC3339Nano, x.started)
+		if err != nil || time.Now().UTC().Before(started.Add(time.Duration(x.timeout)*time.Second+30*time.Second)) {
+			continue
+		}
+		if x.kind == "test" || x.kind == "build" {
+			_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='pending',next_retry_at=? where id=? and status='running'`, now(), x.id)
+		}
+	}
+	rowsRelease, _ := w.db.QueryContext(ctx, `select ps.id,ps.run_id,pr.safe_commit,ps.timeout_seconds,ps.started_at from pipeline_steps ps join pipeline_runs pr on pr.id=ps.run_id where ps.status='running' and ps.kind='release'`)
 	if rowsRelease != nil {
 		for rowsRelease.Next() {
 			var id, run int64
-			var safe string
-			_ = rowsRelease.Scan(&id, &run, &safe)
+			var safe, startedRaw string
+			var timeout int
+			_ = rowsRelease.Scan(&id, &run, &safe, &timeout, &startedRaw)
+			started, err := time.Parse(time.RFC3339Nano, startedRaw)
+			if err != nil || time.Now().UTC().Before(started.Add(time.Duration(timeout)*time.Second+30*time.Second)) {
+				continue
+			}
 			_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='failed',failure_class='environment_failure',output_summary='发布状态不确定，需要人工回滚确认',completed_at=? where id=?`, now(), id)
 			_, _ = w.db.ExecContext(ctx, `insert into pipeline_rollbacks(run_id,safe_commit,status,created_at) values(?,?,'awaiting_confirmation',?) on conflict(run_id) do nothing`, run, safe, now())
 		}
 		rowsRelease.Close()
 	}
+	_, _ = w.db.ExecContext(ctx, `update pipeline_rollbacks set status='failed',last_error='rollback worker interrupted; explicit reconfirmation required',completed_at=? where status='running' and confirmed_at<?`, now(), time.Now().UTC().Add(-10*time.Minute).Format(time.RFC3339Nano))
 	if err := w.scanRollbacks(ctx); err != nil {
 		return err
 	}
@@ -99,7 +130,7 @@ func (w *Worker) run(ctx context.Context, id int64) error {
 	var project int64
 	var args string
 	var rev int
-	e := w.db.QueryRowContext(ctx, `select ps.run_id,pr.project_id,ps.step_key,ps.kind,ps.command,ps.args_json,ps.artifact,ps.timeout_seconds,ps.max_attempts,ps.reversible,ps.attempt from pipeline_steps ps join pipeline_runs pr on pr.id=ps.run_id where ps.id=?`, id).Scan(&s.RunID, &project, &s.Key, &s.Kind, &s.Command, &args, &s.Artifact, &s.TimeoutSeconds, &s.MaxAttempts, &rev, &s.Attempt)
+	e := w.db.QueryRowContext(ctx, `select ps.run_id,pr.project_id,ps.step_key,ps.kind,ps.command,ps.args_json,ps.artifact,ps.health_url,ps.timeout_seconds,ps.max_attempts,ps.reversible,ps.attempt from pipeline_steps ps join pipeline_runs pr on pr.id=ps.run_id where ps.id=?`, id).Scan(&s.RunID, &project, &s.Key, &s.Kind, &s.Command, &args, &s.Artifact, &s.HealthURL, &s.TimeoutSeconds, &s.MaxAttempts, &rev, &s.Attempt)
 	if e != nil {
 		return e
 	}
@@ -118,6 +149,16 @@ func (w *Worker) run(ctx context.Context, id int64) error {
 	if e != nil {
 		return w.finish(id, s, Result{FailureClass: "environment_failure", Err: e})
 	}
+	if s.Kind == "build" && s.Artifact != "" {
+		if e = w.ensureBackup(s.RunID, dir, s.Artifact); e != nil {
+			return w.finish(id, s, Result{FailureClass: "environment_failure", Err: e})
+		}
+	}
+	if s.Kind == "release" {
+		if e = w.validateRelease(ctx, s.RunID, dir, s.Artifact); e != nil {
+			return w.finish(id, s, Result{FailureClass: "environment_failure", Err: e})
+		}
+	}
 	result := w.runner.Run(ctx, dir, s)
 	if result.Err == nil && s.Kind == "build" && s.Artifact != "" {
 		hash, e := hashArtifact(filepath.Join(dir, s.Artifact))
@@ -125,6 +166,12 @@ func (w *Worker) run(ctx context.Context, id int64) error {
 			result = Result{FailureClass: "environment_failure", Err: e}
 		} else {
 			_, _ = w.db.ExecContext(ctx, `update pipeline_runs set artifact_hash=? where id=?`, hash, s.RunID)
+		}
+	}
+	if result.Err == nil && s.Kind == "release" {
+		result.Err = checkHealth(ctx, s.HealthURL)
+		if result.Err != nil {
+			result.FailureClass = "environment_failure"
 		}
 	}
 	return w.finish(id, s, result)
@@ -202,12 +249,19 @@ func (w *Worker) scanRollbacks(ctx context.Context) error {
 			var s Step
 			var args string
 			var rev int
-			e = w.db.QueryRowContext(ctx, `select id,step_key,kind,command,args_json,timeout_seconds,max_attempts,reversible from pipeline_steps where run_id=? and kind='release' order by id desc limit 1`, x.run).Scan(&s.ID, &s.Key, &s.Kind, &s.Command, &args, &s.TimeoutSeconds, &s.MaxAttempts, &rev)
+			var backupPath, backupHash, artifact string
+			e = w.db.QueryRowContext(ctx, `select pr.backup_path,pr.backup_hash,ps.id,ps.step_key,ps.kind,ps.command,ps.args_json,ps.health_url,ps.timeout_seconds,ps.max_attempts,ps.reversible,(select artifact from pipeline_steps where run_id=pr.id and kind='build' order by id desc limit 1) from pipeline_runs pr join pipeline_steps ps on ps.run_id=pr.id and ps.kind='release' where pr.id=? order by ps.id desc limit 1`, x.run).Scan(&backupPath, &backupHash, &s.ID, &s.Key, &s.Kind, &s.Command, &args, &s.HealthURL, &s.TimeoutSeconds, &s.MaxAttempts, &rev, &artifact)
 			s.Reversible = rev == 1
 			_ = jsonUnmarshal(args, &s.Args)
 			if e == nil {
+				e = restoreBackup(dir, artifact, backupPath, backupHash)
+			}
+			if e == nil {
 				r := w.runner.Run(ctx, dir, s)
 				e = r.Err
+			}
+			if e == nil {
+				e = checkHealth(ctx, s.HealthURL)
 			}
 		}
 		status := "rolled_back"
@@ -215,6 +269,168 @@ func (w *Worker) scanRollbacks(ctx context.Context) error {
 			status = "failed"
 		}
 		_, _ = w.db.ExecContext(ctx, `update pipeline_rollbacks set status=?,last_error=?,completed_at=? where id=?`, status, redact(fmt.Sprint(e)), now(), x.id)
+	}
+	return nil
+}
+
+func (w *Worker) ensureBackup(runID int64, dir, artifact string) error {
+	var existing string
+	if err := w.db.QueryRow(`select backup_path from pipeline_runs where id=?`, runID).Scan(&existing); err != nil || existing != "" {
+		return err
+	}
+	src, err := safeProjectPath(dir, artifact)
+	if err != nil {
+		return err
+	}
+	if _, err = os.Lstat(src); err != nil {
+		return fmt.Errorf("existing deployment artifact required: %w", err)
+	}
+	dst := filepath.Join(filepath.Dir(dir), ".wanxiang-release-backups", filepath.Base(dir), fmt.Sprint(runID))
+	if err = copyArtifact(src, dst); err != nil {
+		return err
+	}
+	hash, err := hashArtifact(dst)
+	if err != nil {
+		return err
+	}
+	_, err = w.db.Exec(`update pipeline_runs set backup_path=?,backup_hash=? where id=? and backup_path=''`, dst, hash, runID)
+	return err
+}
+
+func (w *Worker) validateRelease(ctx context.Context, runID int64, dir, _ string) error {
+	var safe, expected, artifact, definitionHash string
+	if err := w.db.QueryRow(`select pr.safe_commit,pr.artifact_hash,pr.definition_hash,(select artifact from pipeline_steps where run_id=pr.id and kind='build' order by id desc limit 1) from pipeline_runs pr where pr.id=?`, runID).Scan(&safe, &expected, &definitionHash, &artifact); err != nil {
+		return err
+	}
+	if len(safe) != 40 {
+		return fmt.Errorf("release safe commit invalid")
+	}
+	definition, err := LoadDefinition(dir)
+	if err != nil {
+		return fmt.Errorf("release definition unavailable")
+	}
+	raw, _ := json.Marshal(definition)
+	sum := sha256.Sum256(raw)
+	if hex.EncodeToString(sum[:]) != definitionHash {
+		return fmt.Errorf("release definition drifted")
+	}
+	for _, spec := range []struct {
+		args []string
+		want string
+	}{{[]string{"branch", "--show-current"}, "main"}, {[]string{"status", "--porcelain"}, ""}, {[]string{"rev-parse", "HEAD"}, safe}} {
+		cmd := exec.CommandContext(ctx, "git", spec.args...)
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		if err != nil || strings.TrimSpace(string(out)) != spec.want {
+			return fmt.Errorf("release git baseline drifted")
+		}
+	}
+	p, err := safeProjectPath(dir, artifact)
+	if err != nil {
+		return err
+	}
+	actual, err := hashArtifact(p)
+	if err != nil || expected == "" || actual != expected {
+		return fmt.Errorf("release artifact hash mismatch")
+	}
+	return nil
+}
+
+func safeProjectPath(root, rel string) (string, error) {
+	base, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	p := filepath.Join(base, rel)
+	parent, err := filepath.EvalSymlinks(filepath.Dir(p))
+	if err != nil {
+		return "", fmt.Errorf("artifact parent unavailable")
+	}
+	p = filepath.Join(parent, filepath.Base(p))
+	if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
+		return "", fmt.Errorf("artifact escapes project")
+	}
+	return p, nil
+}
+
+func copyArtifact(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("unsafe artifact")
+	}
+	if info.IsDir() {
+		if err = os.MkdirAll(dst, 0700); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, ent := range entries {
+			if err = copyArtifact(filepath.Join(src, ent.Name()), filepath.Join(dst, ent.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err = os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	_, cpErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if cpErr != nil {
+		return cpErr
+	}
+	return closeErr
+}
+
+func restoreBackup(dir, artifact, backup, expected string) error {
+	if backup == "" || expected == "" {
+		return fmt.Errorf("rollback backup unavailable")
+	}
+	h, err := hashArtifact(backup)
+	if err != nil || h != expected {
+		return fmt.Errorf("rollback backup hash mismatch")
+	}
+	dst, err := safeProjectPath(dir, artifact)
+	if err != nil {
+		return err
+	}
+	if err = os.RemoveAll(dst); err != nil {
+		return err
+	}
+	if err = copyArtifact(backup, dst); err != nil {
+		return err
+	}
+	h, err = hashArtifact(dst)
+	if err != nil || h != expected {
+		return fmt.Errorf("restored artifact hash mismatch")
+	}
+	return nil
+}
+
+func checkHealth(ctx context.Context, raw string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("health status %d", resp.StatusCode)
 	}
 	return nil
 }

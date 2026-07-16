@@ -2,6 +2,7 @@ package pipelines
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,7 +12,11 @@ import (
 var safeID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 func LoadDefinition(projectDir string) (Definition, error) {
-	path := filepath.Join(projectDir, ".wanxiang", "pipeline.json")
+	meta := filepath.Join(projectDir, ".wanxiang")
+	if info, err := os.Lstat(meta); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return Definition{}, ErrInvalidDefinition
+	}
+	path := filepath.Join(meta, "pipeline.json")
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 {
 		return Definition{}, ErrInvalidDefinition
@@ -28,6 +33,7 @@ func LoadDefinition(projectDir string) (Definition, error) {
 }
 func Validate(d Definition) error {
 	seen := map[string]bool{}
+	buildArtifact := ""
 	if len(d.Steps) == 0 || len(d.Steps) > 32 {
 		return ErrInvalidDefinition
 	}
@@ -48,11 +54,24 @@ func Validate(d Definition) error {
 				return ErrInvalidDefinition
 			}
 		}
+		if s.Kind == "build" {
+			if s.Artifact != "" {
+				buildArtifact = s.Artifact
+			}
+		}
+		if s.Kind == "release" && (buildArtifact == "" || !validHealthURL(s.HealthURL)) {
+			return ErrInvalidDefinition
+		}
 		if s.Kind == "migration" || s.Kind == "delete" {
 			return ErrInvalidDefinition
 		}
 	}
 	return nil
+}
+
+func validHealthURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost") && u.Port() != "" && u.Path != ""
 }
 func allowedStep(s StepDefinition) bool {
 	switch s.Kind {

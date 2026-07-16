@@ -88,6 +88,8 @@ func (w *Worker) Scan(ctx context.Context) error {
 		if x.kind == "test" || x.kind == "build" {
 			if x.attempt >= x.max {
 				_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='failed',failure_class='environment_failure',output_summary='worker interrupted and retry budget exhausted',completed_at=? where id=? and status='running'`, now(), x.id)
+				_, _ = w.db.ExecContext(ctx, `insert into issues(task_id,title,body,status,blocking,created_by,created_at) select task_id,'流水线恢复失败','worker interrupted and retry budget exhausted','blocking',1,'pipeline',? from pipeline_runs where id=?`, now(), x.run)
+				_, _ = w.db.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) select task_id,'pipeline.recovery.exhausted','pipeline',?,? from pipeline_runs where id=?`, fmt.Sprintf(`{"run_id":%d,"step_id":%d}`, x.run, x.id), now(), x.run)
 				w.refreshRun(x.run)
 			} else {
 				_, _ = w.db.ExecContext(ctx, `update pipeline_steps set status='pending',next_retry_at=? where id=? and status='running'`, now(), x.id)

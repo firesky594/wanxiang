@@ -268,6 +268,12 @@ func (s *Service) loadRuntimeConfig(ctx context.Context, name string) (runtimeCo
 	}
 	status := "configured"
 	_ = s.db.QueryRowContext(ctx, `select status from agent_registry where name=?`, name).Scan(&status)
+	if status == "blocked: missing_config" {
+		if _, err := s.db.ExecContext(ctx, `update agent_registry set status='configured',current_model=? where name=? and status='blocked: missing_config'`, model, name); err != nil {
+			return runtimeConfig{}, err
+		}
+		status = "configured"
+	}
 	return runtimeConfig{AgentConfigView: AgentConfigView{Name: name, ProviderType: providerType, BaseURL: baseURL, Model: model, SecretConfigured: true, Status: status}, APIKey: apiKey}, nil
 }
 

@@ -31,6 +31,10 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`create table if not exists acceptance_decisions (id integer primary key, snapshot_id integer not null, task_id integer not null, decision text not null, comment text not null default '', idempotency_key text not null unique, created_by text not null, created_at text not null)`,
 		`create table if not exists rework_rounds (id integer primary key, task_id integer not null, source_snapshot_id integer not null, decision_id integer not null unique, round integer not null, plan_version integer not null, reason text not null, status text not null, checkpoint_json text not null default '{}', last_error text not null default '', created_by text not null, created_at text not null, completed_at text, unique(task_id,round), unique(task_id,plan_version))`,
 		`create index if not exists idx_rework_rounds_status on rework_rounds(status,created_at)`,
+		`create table if not exists pipeline_runs (id integer primary key, project_id integer not null, task_id integer, definition_json text not null, definition_hash text not null, status text not null, safe_commit text not null default '', artifact_hash text not null default '', backup_path text not null default '', backup_hash text not null default '', idempotency_key text not null unique, requested_by text not null, created_at text not null, started_at text, completed_at text, last_error text not null default '')`,
+		`create table if not exists pipeline_steps (id integer primary key, run_id integer not null, step_key text not null, kind text not null, command text not null, args_json text not null, artifact text not null default '', health_url text not null default '', timeout_seconds integer not null, max_attempts integer not null, reversible integer not null default 1, status text not null, attempt integer not null default 0, failure_class text not null default '', output_summary text not null default '', next_retry_at text, confirmed_by text not null default '', confirmed_at text, started_at text, completed_at text, unique(run_id,step_key))`,
+		`create index if not exists idx_pipeline_steps_status on pipeline_steps(status,next_retry_at)`,
+		`create table if not exists pipeline_rollbacks (id integer primary key, run_id integer not null unique, safe_commit text not null, status text not null, confirmed_by text not null default '', confirmed_at text, started_at text, created_at text not null, completed_at text, last_error text not null default '')`,
 		`create table if not exists issues (id integer primary key, task_id integer, mr_id integer, title text not null, body text not null, status text not null, blocking integer not null default 0, created_by text not null, created_at text not null, closed_at text)`,
 		`create table if not exists runtime_events (id integer primary key, task_id integer, event_type text not null, actor text not null, payload_json text not null, created_at text not null)`,
 		`create table if not exists token_usage (id integer primary key, task_id integer, step_id integer, agent_name text not null, model text not null, input_tokens integer not null, output_tokens integer not null, created_at text not null)`,
@@ -102,6 +106,11 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		{"rework_rounds", "next_retry_at", "text"},
 		{"rework_rounds", "processing_started_at", "text"},
 		{"task_steps", "plan_version", "integer not null default 1"},
+		{"pipeline_steps", "artifact", "text not null default ''"},
+		{"pipeline_steps", "health_url", "text not null default ''"},
+		{"pipeline_runs", "backup_path", "text not null default ''"},
+		{"pipeline_runs", "backup_hash", "text not null default ''"},
+		{"pipeline_rollbacks", "started_at", "text"},
 		{"workflow_edges", "plan_version", "integer not null default 1"},
 	} {
 		if err := ensureColumn(ctx, conn, column.table, column.name, column.definition); err != nil {

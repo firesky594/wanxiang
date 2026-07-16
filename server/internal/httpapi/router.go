@@ -13,6 +13,7 @@ import (
 	"wanxiang-agent/server/internal/issues"
 	"wanxiang-agent/server/internal/leases"
 	"wanxiang-agent/server/internal/mr"
+	"wanxiang-agent/server/internal/pipelines"
 	"wanxiang-agent/server/internal/tasks"
 	"wanxiang-agent/server/internal/workspaces"
 )
@@ -30,6 +31,7 @@ type Dependencies struct {
 	Leases      *leases.Service
 	Executor    *executor.AdminService
 	Deliveries  *deliveries.Service
+	Pipelines   *pipelines.Service
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -99,6 +101,13 @@ func NewRouter(deps Dependencies) http.Handler {
 			admin.Get("/api/admin/deliveries/{id}", handleGetDelivery(deps.Deliveries))
 			admin.Post("/api/admin/deliveries/{id}/decisions", handleDecideDelivery(deps.Deliveries))
 			admin.Get("/api/admin/tasks/{id}/rework-rounds", handleListReworkRounds(deps.Deliveries))
+		}
+		if deps.Pipelines != nil {
+			admin.Get("/api/admin/pipelines", handleListPipelines(deps.Pipelines))
+			admin.Get("/api/admin/pipelines/{id}", handleGetPipeline(deps.Pipelines))
+			admin.Post("/api/admin/projects/{id}/pipelines", handleStartPipeline(deps.DB, deps.Pipelines))
+			admin.Post("/api/admin/pipelines/{id}/steps/{step}/confirm", handleConfirmPipeline(deps.Pipelines))
+			admin.Post("/api/admin/pipelines/{id}/rollback/confirm", handleConfirmRollback(deps.Pipelines))
 		}
 	})
 	r.Group(func(agent chi.Router) {

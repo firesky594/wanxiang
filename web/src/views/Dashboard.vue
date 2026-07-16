@@ -10,6 +10,7 @@
         <RouterLink to="/agents"><el-icon><Connection /></el-icon>Agents</RouterLink>
         <RouterLink to="/mrs"><el-icon><Share /></el-icon>MR</RouterLink>
         <RouterLink to="/deliveries"><el-icon><DocumentChecked /></el-icon>交付验收</RouterLink>
+        <RouterLink to="/pipelines">流水线</RouterLink>
         <RouterLink to="/issues"><el-icon><Warning /></el-icon>Issue</RouterLink>
       </nav>
     </header>

@@ -6,6 +6,7 @@ import MergeRequests from './views/MergeRequests.vue'
 import Issues from './views/Issues.vue'
 import AdminAccess from './views/AdminAccess.vue'
 import Deliveries from './views/Deliveries.vue'
+import Pipelines from './views/Pipelines.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -19,7 +20,8 @@ export const router = createRouter({
     { path: '/tasks/:id', component: TaskDetail },
     { path: '/mrs', component: MergeRequests },
     { path: '/issues', component: Issues },
-    { path: '/deliveries', component: Deliveries }
+    { path: '/deliveries', component: Deliveries },
+    { path: '/pipelines', component: Pipelines }
   ]
 })
 

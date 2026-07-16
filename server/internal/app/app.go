@@ -18,6 +18,7 @@ import (
 	"wanxiang-agent/server/internal/issues"
 	"wanxiang-agent/server/internal/leases"
 	"wanxiang-agent/server/internal/mr"
+	"wanxiang-agent/server/internal/pipelines"
 	"wanxiang-agent/server/internal/planning"
 	"wanxiang-agent/server/internal/tasks"
 	"wanxiang-agent/server/internal/workspaces"
@@ -33,6 +34,7 @@ type App struct {
 	LeaseRecovery *leases.Worker
 	Executor      *executor.Supervisor
 	Deliveries    *deliveries.Worker
+	Pipelines     *pipelines.Worker
 	HTTP          httpapi.Dependencies
 }
 
@@ -78,6 +80,13 @@ func New(cfg config.Config) (*App, error) {
 	leaseWorker.Start()
 	executorSupervisor := executor.NewSupervisor(cfg, conn, leaseSvc, nil, executor.SupervisorOptions{GlobalLimit: 1})
 	executorSupervisor.Start()
+	pipelineSvc := pipelines.NewService(conn)
+	pipelineWorker := pipelines.NewWorker(conn, pipelines.CommandRunner{}, 2*time.Second, func(projectID int64) (string, error) {
+		var dir string
+		err := conn.QueryRow(`select dir from projects where id=?`, projectID).Scan(&dir)
+		return dir, err
+	})
+	pipelineWorker.Start()
 	return &App{
 		Config:        cfg,
 		DB:            conn,
@@ -88,11 +97,15 @@ func New(cfg config.Config) (*App, error) {
 		LeaseRecovery: leaseWorker,
 		Executor:      executorSupervisor,
 		Deliveries:    deliveryWorker,
-		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc, Executor: executor.NewAdminService(conn, executorSupervisor), Deliveries: deliverySvc},
+		Pipelines:     pipelineWorker,
+		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc, Executor: executor.NewAdminService(conn, executorSupervisor), Deliveries: deliverySvc, Pipelines: pipelineSvc},
 	}, nil
 }
 
 func (a *App) Close() error {
+	if a.Pipelines != nil {
+		a.Pipelines.Close()
+	}
 	if a.Deliveries != nil {
 		a.Deliveries.Close()
 	}

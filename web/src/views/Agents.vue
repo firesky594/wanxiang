@@ -115,6 +115,8 @@ function resetForm() {
   Object.assign(form, { name: '', provider_type: 'openai', model: modelDefaults.openai, base_url: defaults.openai, api_key: '' })
 }
 
+defineExpose({ form, edit, applyProviderDefault, resetForm })
+
 async function save() {
   if (!form.name.trim() || !form.model.trim() || (!form.api_key.trim() && !selected.value?.secret_configured)) {
     ElMessage.warning('请填写 Agent 名称、模型和 API Key')

@@ -95,6 +95,27 @@ func TestGetAgentConfigRepairsStaleMissingConfigWithoutLosingEnv(t *testing.T) {
 	}
 }
 
+func TestGetAgentConfigDoesNotOverwriteRuntimeStatuses(t *testing.T) {
+	for _, status := range []string{"online", "blocked: provider_error"} {
+		t.Run(status, func(t *testing.T) {
+			root := t.TempDir()
+			cfg, _ := config.Load(root)
+			conn := testutil.OpenDB(t)
+			svc := NewService(cfg, conn)
+			if _, err := svc.SaveAgentConfig(t.Context(), AgentConfigInput{Name: "worker-1", ProviderType: "openai", Model: "gpt-5.2", APIKey: "test-key"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.Exec(`update agent_registry set status=? where name='worker-1'`, status); err != nil {
+				t.Fatal(err)
+			}
+			view, err := svc.GetAgentConfig(t.Context(), "worker-1")
+			if err != nil || view.Status != status {
+				t.Fatalf("status=%q view=%+v err=%v", status, view, err)
+			}
+		})
+	}
+}
+
 func TestProbeAgentSelectsConfiguredProviderAndPersistsStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

@@ -327,3 +327,12 @@ export interface Issue {
   blocking: boolean
   created_by: string
 }
+
+export interface DeliveryEvidence { merge_requests: Array<{id:number;step_id:number;status:string;source_commit:string;merge_commit:string;agent_name:string}>; reports:Array<{id:number;step_id:number;agent_name:string;completed:string[];key_files:string[]}>; tests:TestEvidence[]; risks:string[]; incomplete:string[] }
+export interface DeliverySnapshot { id:number;task_id:number;project_id:number;version:number;manager_notification_id:number;main_commit:string;status:string;summary:string;summary_hash:string;evidence:DeliveryEvidence;created_by:string;created_at:string }
+export interface AcceptanceDecision { id:number;snapshot_id:number;task_id:number;decision:string;comment:string;created_by:string;created_at:string }
+export interface ReworkRound { id:number;task_id:number;source_snapshot_id:number;decision_id:number;round:number;plan_version:number;reason:string;status:string;last_error?:string;created_by:string;created_at:string }
+export interface DeliveryDetail { snapshot:DeliverySnapshot;decisions:AcceptanceDecision[];rework_rounds:ReworkRound[] }
+export async function listDeliveries():Promise<DeliverySnapshot[]>{const response=await api<{ok:boolean;deliveries:DeliverySnapshot[]}>('/api/admin/deliveries');return response.deliveries}
+export async function getDelivery(id:number):Promise<DeliveryDetail>{const response=await api<{ok:boolean;detail:DeliveryDetail}>(`/api/admin/deliveries/${id}`);return response.detail}
+export async function decideDelivery(id:number,input:{decision:'accepted'|'rejected'|'revision_requested';comment:string;idempotency_key:string}){const response=await api<{ok:boolean;result:{decision:AcceptanceDecision;rework_round?:ReworkRound;task_status:string}}>(`/api/admin/deliveries/${id}/decisions`,{method:'POST',body:JSON.stringify(input)});return response.result}

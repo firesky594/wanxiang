@@ -14,13 +14,15 @@ import (
 )
 
 type fakePlanner struct {
-	result providers.Result
-	err    error
-	calls  int
+	result   providers.Result
+	err      error
+	calls    int
+	messages []providers.Message
 }
 
-func (f *fakePlanner) ChatAgent(context.Context, string, []providers.Message, int) (providers.Result, error) {
+func (f *fakePlanner) ChatAgent(_ context.Context, _ string, messages []providers.Message, _ int) (providers.Result, error) {
 	f.calls++
+	f.messages = messages
 	return f.result, f.err
 }
 
@@ -71,6 +73,32 @@ func TestServiceBlocksInvalidPlanningOutputWithoutLeakingIt(t *testing.T) {
 		t.Fatalf("status=%q summary=%q", status, summary)
 	}
 	assertCount(t, conn, "task_steps", 0)
+}
+
+func TestServicePlansReworkIntoNewVersionWithoutChangingHistory(t *testing.T) {
+	cfg, conn, taskID := planningFixture(t)
+	_, _ = conn.Exec(`update tasks set status='rework_planning' where id=?`, taskID)
+	_, _ = conn.Exec(`insert into task_plan_versions(task_id,version,status,summary,created_at) values(?,1,'completed','old','now')`, taskID)
+	_, _ = conn.Exec(`insert into task_steps(task_id,agent_name,kind,status,input,created_at,plan_version) values(?,'worker','backend','completed','{}','now',1)`, taskID)
+	var projectID int64
+	_ = conn.QueryRow(`select project_id from tasks where id=?`, taskID).Scan(&projectID)
+	snapshot, _ := conn.Exec(`insert into delivery_snapshots(task_id,project_id,version,manager_notification_id,main_commit,status,summary,summary_hash,evidence_json,created_by,created_at) values(?,?,1,99,'abc','revision_requested','delivery','hash','{"tests":[{"command":"go test ./..."}]}','manager','now')`, taskID, projectID)
+	snapshotID, _ := snapshot.LastInsertId()
+	_, _ = conn.Exec(`insert into task_plan_versions(task_id,version,source_snapshot_id,status,summary,created_at) values(?,2,?,'planning','','now')`, taskID, snapshotID)
+	fake := &fakePlanner{result: providers.Result{Content: `{"summary":"rework","work_items":[{"key":"fix","title":"修正","description":"补充","kind":"backend","required_capabilities":["go"],"acceptance_criteria":["测试通过"],"depends_on":[]}]}`}}
+	plan, err := NewService(cfg, conn, fake).PlanRework(t.Context(), taskID, 2, "补充移动端")
+	if err != nil || plan.Summary != "rework" {
+		t.Fatalf("plan=%#v err=%v", plan, err)
+	}
+	var oldCount, newCount int
+	_ = conn.QueryRow(`select count(*) from task_steps where task_id=? and plan_version=1 and status='completed'`, taskID).Scan(&oldCount)
+	_ = conn.QueryRow(`select count(*) from task_steps where task_id=? and plan_version=2 and status='created'`, taskID).Scan(&newCount)
+	if oldCount != 1 || newCount != 1 {
+		t.Fatalf("old=%d new=%d", oldCount, newCount)
+	}
+	if len(fake.messages) == 0 || !strings.Contains(fake.messages[len(fake.messages)-1].Content, "go test ./...") {
+		t.Fatal("rework evidence was not sent to manager")
+	}
 }
 
 func planningFixture(t *testing.T) (config.Config, *sql.DB, int64) {

@@ -67,7 +67,7 @@ func TestProvisionTaskDoesNotReuseUnknownBranchOrDirectory(t *testing.T) {
 			}
 			var item planning.WorkItem
 			_ = json.Unmarshal([]byte(input), &item)
-			branch := "agent/api/" + itoa(taskID) + "-" + item.Key
+			branch := "agent/api/" + itoa(taskID) + "-" + itoa(stepID) + "-" + item.Key
 			path := filepath.Join(cfg.DataDir, "worktrees", "task-"+itoa(taskID), "step-"+itoa(stepID)+"-api")
 			if scenario == "branch" {
 				if out, err := gitx.Run(t.Context(), projectDir, "branch", branch, "HEAD"); err != nil {

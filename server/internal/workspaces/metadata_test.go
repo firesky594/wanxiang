@@ -16,7 +16,7 @@ func TestMetadataEncodingIsDeterministicAndAuditable(t *testing.T) {
 		t.Fatalf("metadata:\n%s\nwant:\n%s", got, want)
 	}
 
-	assignment := AssignmentMetadata{MetadataVersion: 1, TaskID: 12, StepID: 34, AssignmentID: 56, WorkItemKey: "api", AgentName: "api", ReportsTo: "lead", BranchName: "agent/api/12-api", WorktreeID: "task-12-step-34", BaseCommit: "abc123", WriteScope: []string{"."}, Status: "ready"}
+	assignment := AssignmentMetadata{MetadataVersion: 1, TaskID: 12, StepID: 34, AssignmentID: 56, WorkItemKey: "api", AgentName: "api", ReportsTo: "lead", BranchName: "agent/api/12-34-api", WorktreeID: "task-12-step-34", BaseCommit: "abc123", WriteScope: []string{"."}, Status: "ready"}
 	first, hash1, err := EncodeAssignment(assignment)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestMetadataEncodingIsDeterministicAndAuditable(t *testing.T) {
 }
 
 func TestAssignmentMetadataRejectsUnsafeOrUnknownValues(t *testing.T) {
-	base := AssignmentMetadata{MetadataVersion: 1, TaskID: 1, StepID: 2, AssignmentID: 3, WorkItemKey: "api", AgentName: "worker", BranchName: "agent/worker/1-api", WorktreeID: "task-1-step-2", BaseCommit: "abc", WriteScope: []string{"."}, Status: "ready"}
+	base := AssignmentMetadata{MetadataVersion: 1, TaskID: 1, StepID: 2, AssignmentID: 3, WorkItemKey: "api", AgentName: "worker", BranchName: "agent/worker/1-2-api", WorktreeID: "task-1-step-2", BaseCommit: "abc", WriteScope: []string{"."}, Status: "ready"}
 	for name, mutate := range map[string]func(*AssignmentMetadata){
 		"absolute scope": func(v *AssignmentMetadata) { v.WriteScope = []string{"/tmp"} },
 		"parent scope":   func(v *AssignmentMetadata) { v.WriteScope = []string{"../secret"} },

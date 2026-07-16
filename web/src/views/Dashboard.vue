@@ -9,6 +9,7 @@
         <RouterLink to="/agents"><el-icon><Key /></el-icon>Agent 配置</RouterLink>
         <RouterLink to="/agents"><el-icon><Connection /></el-icon>Agents</RouterLink>
         <RouterLink to="/mrs"><el-icon><Share /></el-icon>MR</RouterLink>
+        <RouterLink to="/deliveries"><el-icon><DocumentChecked /></el-icon>交付验收</RouterLink>
         <RouterLink to="/issues"><el-icon><Warning /></el-icon>Issue</RouterLink>
       </nav>
     </header>

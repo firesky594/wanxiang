@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"wanxiang-agent/server/internal/agents"
 	"wanxiang-agent/server/internal/assignments"
+	"wanxiang-agent/server/internal/deliveries"
 	"wanxiang-agent/server/internal/events"
 	"wanxiang-agent/server/internal/executor"
 	"wanxiang-agent/server/internal/issues"
@@ -28,6 +29,7 @@ type Dependencies struct {
 	Workspaces  *workspaces.Service
 	Leases      *leases.Service
 	Executor    *executor.AdminService
+	Deliveries  *deliveries.Service
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -91,6 +93,12 @@ func NewRouter(deps Dependencies) http.Handler {
 			admin.Get("/api/admin/mrs", handleListMRs(deps.MR))
 			admin.Get("/api/admin/mrs/{id}", handleGetMR(deps.MR))
 			admin.Get("/api/admin/manager-notifications", handleListManagerNotifications(deps.MR))
+		}
+		if deps.Deliveries != nil {
+			admin.Get("/api/admin/deliveries", handleListDeliveries(deps.Deliveries))
+			admin.Get("/api/admin/deliveries/{id}", handleGetDelivery(deps.Deliveries))
+			admin.Post("/api/admin/deliveries/{id}/decisions", handleDecideDelivery(deps.Deliveries))
+			admin.Get("/api/admin/tasks/{id}/rework-rounds", handleListReworkRounds(deps.Deliveries))
 		}
 	})
 	r.Group(func(agent chi.Router) {

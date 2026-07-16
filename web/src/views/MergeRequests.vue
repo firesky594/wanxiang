@@ -8,6 +8,7 @@
       <nav class="nav" aria-label="主导航">
         <RouterLink to="/dashboard"><el-icon><ArrowRight /></el-icon>调度台</RouterLink>
         <RouterLink to="/issues"><el-icon><Warning /></el-icon>Issue</RouterLink>
+        <RouterLink to="/deliveries"><el-icon><ArrowRight /></el-icon>交付验收</RouterLink>
       </nav>
     </header>
 

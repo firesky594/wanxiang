@@ -67,7 +67,42 @@ func (s *Service) PlanTask(ctx context.Context, taskID int64) (Plan, error) {
 	if err != nil {
 		return Plan{}, s.block(ctx, taskID, "planning failed: invalid structured response", err)
 	}
-	if err := s.persist(ctx, taskID, plan); err != nil {
+	if err := s.persist(ctx, taskID, 1, "planning", plan); err != nil {
+		return Plan{}, err
+	}
+	return plan, nil
+}
+
+func (s *Service) PlanRework(ctx context.Context, taskID, version int64, reason string) (Plan, error) {
+	task, err := s.loadTask(ctx, taskID)
+	if err != nil {
+		return Plan{}, err
+	}
+	if task.Status != "rework_planning" {
+		return Plan{}, fmt.Errorf("task status %q cannot be reworked", task.Status)
+	}
+	var snapshotSummary, evidence string
+	err = s.db.QueryRowContext(ctx, `select ds.summary,ds.evidence_json from task_plan_versions pv join delivery_snapshots ds on ds.id=pv.source_snapshot_id where pv.task_id=? and pv.version=?`, taskID, version).Scan(&snapshotSummary, &evidence)
+	if err != nil {
+		return Plan{}, fmt.Errorf("load rework source snapshot: %w", err)
+	}
+	task.Description += "\n\n返工来源交付：" + snapshotSummary + "\n返工交付证据(JSON)：" + evidence + "\n用户返工意见：" + reason
+	messages, err := BuildMessages(filepath.Join(s.cfg.AgentDir, "manager"), task)
+	if err != nil {
+		return Plan{}, err
+	}
+	if s.chatter == nil {
+		return Plan{}, errors.New("missing_config")
+	}
+	result, err := s.chatter.ChatAgent(ctx, "manager", messages, 4000)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan, err := ParsePlan([]byte(result.Content))
+	if err != nil {
+		return Plan{}, err
+	}
+	if err = s.persist(ctx, taskID, version, "rework_planning", plan); err != nil {
 		return Plan{}, err
 	}
 	return plan, nil
@@ -82,7 +117,7 @@ func (s *Service) loadTask(ctx context.Context, id int64) (tasks.Task, error) {
 	return item, err
 }
 
-func (s *Service) persist(ctx context.Context, taskID int64, plan Plan) error {
+func (s *Service) persist(ctx context.Context, taskID, version int64, expectedStatus string, plan Plan) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -92,14 +127,17 @@ func (s *Service) persist(ctx context.Context, taskID int64, plan Plan) error {
 	if err := tx.QueryRowContext(ctx, `select status from tasks where id=?`, taskID).Scan(&status); err != nil {
 		return err
 	}
-	if status != "planning" {
+	if status != expectedStatus {
 		return fmt.Errorf("task status changed to %q during planning", status)
 	}
 	created := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `insert into task_plan_versions(task_id,version,status,summary,created_at) values(?,?,'planning',?,?) on conflict(task_id,version) do update set status='planning',summary=excluded.summary`, taskID, version, plan.Summary, created); err != nil {
+		return err
+	}
 	ids := map[string]int64{}
 	for _, item := range plan.WorkItems {
 		encoded, _ := json.Marshal(item)
-		res, err := tx.ExecContext(ctx, `insert into task_steps(task_id,agent_name,kind,status,input,output,created_at) values(?,'unassigned',?,'created',?,'',?)`, taskID, item.Kind, string(encoded), created)
+		res, err := tx.ExecContext(ctx, `insert into task_steps(task_id,agent_name,kind,status,input,output,created_at,plan_version) values(?,'unassigned',?,'created',?,'',?,?)`, taskID, item.Kind, string(encoded), created, version)
 		if err != nil {
 			return err
 		}
@@ -107,12 +145,22 @@ func (s *Service) persist(ctx context.Context, taskID int64, plan Plan) error {
 	}
 	for _, item := range plan.WorkItems {
 		for _, dep := range item.DependsOn {
-			if _, err := tx.ExecContext(ctx, `insert into workflow_edges(task_id,from_step_id,to_step_id,label,created_at) values(?,?,?,?,?)`, taskID, ids[dep], ids[item.Key], "depends_on", created); err != nil {
+			if _, err := tx.ExecContext(ctx, `insert into workflow_edges(task_id,from_step_id,to_step_id,label,created_at,plan_version) values(?,?,?,?,?,?)`, taskID, ids[dep], ids[item.Key], "depends_on", created, version); err != nil {
 				return err
 			}
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `update tasks set status='planned',manager_summary=? where id=? and status='planning'`, plan.Summary, taskID); err != nil {
+		if expectedStatus == "planning" {
+			return err
+		}
+	}
+	if expectedStatus == "rework_planning" {
+		if _, err := tx.ExecContext(ctx, `update tasks set status='planned',manager_summary=? where id=? and status='rework_planning'`, plan.Summary, taskID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `update task_plan_versions set status='planned',summary=? where task_id=? and version=?`, plan.Summary, taskID, version); err != nil {
 		return err
 	}
 	payload, _ := json.Marshal(map[string]any{"task_id": taskID, "work_item_count": len(plan.WorkItems), "requires_project_lead": plan.RequiresProjectLead})

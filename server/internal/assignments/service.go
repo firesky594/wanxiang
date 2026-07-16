@@ -45,7 +45,11 @@ type step struct {
 func NewService(cfg config.Config, db *sql.DB) *Service { return &Service{cfg: cfg, db: db} }
 
 func (s *Service) AssignTask(ctx context.Context, taskID int64) (Result, error) {
-	result, found, err := s.existing(ctx, taskID)
+	version, err := s.currentVersion(ctx, taskID)
+	if err != nil {
+		return Result{}, err
+	}
+	result, found, err := s.existing(ctx, taskID, version)
 	if err != nil || found {
 		return result, err
 	}
@@ -57,7 +61,7 @@ func (s *Service) AssignTask(ctx context.Context, taskID int64) (Result, error) 
 	if taskStatus != "planned" && taskStatus != "blocked: missing_config" {
 		return Result{}, fmt.Errorf("task %d is not ready for assignment: %s", taskID, taskStatus)
 	}
-	steps, err := s.loadSteps(ctx, taskID)
+	steps, err := s.loadSteps(ctx, taskID, version)
 	if err != nil {
 		return Result{}, err
 	}
@@ -125,11 +129,11 @@ func (s *Service) AssignTask(ctx context.Context, taskID int64) (Result, error) 
 	if requiresLead && len(result.Assignments) > 0 {
 		lead = result.Assignments[0].AgentName
 	}
-	if _, err = tx.ExecContext(ctx, `insert into team_decisions(task_id,project_lead,requires_lead,reason,created_at) values(?,?,?,?,?)`, taskID, nullable(lead), boolInt(requiresLead), reason, now()); err != nil {
+	if _, err = tx.ExecContext(ctx, `insert into team_decisions(task_id,plan_version,project_lead,requires_lead,reason,created_at) values(?,?,?,?,?,?)`, taskID, version, nullable(lead), boolInt(requiresLead), reason, now()); err != nil {
 		return Result{}, err
 	}
 	if lead != "" {
-		if _, err = tx.ExecContext(ctx, `update task_assignments set reports_to=? where task_id=? and agent_name<>?`, lead, taskID, lead); err != nil {
+		if _, err = tx.ExecContext(ctx, `update task_assignments set reports_to=? where task_id=? and step_id in (select id from task_steps where task_id=? and plan_version=?) and agent_name<>?`, lead, taskID, taskID, version, lead); err != nil {
 			return Result{}, err
 		}
 		for index := range result.Assignments {
@@ -148,9 +152,9 @@ func (s *Service) AssignTask(ctx context.Context, taskID int64) (Result, error) 
 	return result, nil
 }
 
-func (s *Service) existing(ctx context.Context, taskID int64) (Result, bool, error) {
+func (s *Service) existing(ctx context.Context, taskID, version int64) (Result, bool, error) {
 	result := Result{TaskID: taskID, Assignments: []Assignment{}}
-	rows, err := s.db.QueryContext(ctx, `select step_id,agent_name,coalesce(reports_to,'') from task_assignments where task_id=? order by step_id`, taskID)
+	rows, err := s.db.QueryContext(ctx, `select ta.step_id,ta.agent_name,coalesce(ta.reports_to,'') from task_assignments ta join task_steps ts on ts.id=ta.step_id where ta.task_id=? and ts.plan_version=? order by ta.step_id`, taskID, version)
 	if err != nil {
 		return result, false, err
 	}
@@ -170,7 +174,7 @@ func (s *Service) existing(ctx context.Context, taskID int64) (Result, bool, err
 	}
 	result.Status = "assigned"
 	var required int
-	err = s.db.QueryRowContext(ctx, `select requires_lead,coalesce(project_lead,'') from team_decisions where task_id=?`, taskID).Scan(&required, &result.ProjectLead)
+	err = s.db.QueryRowContext(ctx, `select requires_lead,coalesce(project_lead,'') from team_decisions where task_id=? and plan_version=?`, taskID, version).Scan(&required, &result.ProjectLead)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return result, false, err
 	}
@@ -178,8 +182,8 @@ func (s *Service) existing(ctx context.Context, taskID int64) (Result, bool, err
 	return result, true, nil
 }
 
-func (s *Service) loadSteps(ctx context.Context, taskID int64) ([]step, error) {
-	rows, err := s.db.QueryContext(ctx, `select id,input from task_steps where task_id=? order by id`, taskID)
+func (s *Service) loadSteps(ctx context.Context, taskID, version int64) ([]step, error) {
+	rows, err := s.db.QueryContext(ctx, `select id,input from task_steps where task_id=? and plan_version=? order by id`, taskID, version)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +201,12 @@ func (s *Service) loadSteps(ctx context.Context, taskID int64) ([]step, error) {
 		result = append(result, current)
 	}
 	return result, rows.Err()
+}
+
+func (s *Service) currentVersion(ctx context.Context, taskID int64) (int64, error) {
+	var version int64
+	err := s.db.QueryRowContext(ctx, `select coalesce(max(version),1) from task_plan_versions where task_id=?`, taskID).Scan(&version)
+	return version, err
 }
 
 func (s *Service) loadCandidates(ctx context.Context) ([]matching.Candidate, error) {

@@ -518,7 +518,7 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ### M08：总管汇总、用户验收和返工
 
-**状态：规格已按主规范复核，实施计划执行中；依赖 M07 已满足**
+**状态：已完成，待合并与生产部署；依赖 M07 已满足**
 
 目标：总管把项目结果转换成用户可验收的交付，并支持返工回到规划阶段。
 
@@ -539,18 +539,52 @@ next_action: 开始 M07，完成报告、MR 和审核链路
 
 ```yaml
 mission: M08
-phase: implementation_plan
-branch: main
-checkpoint_commit: c022c94
+phase: completed_pending_deploy
+branch: feat/mission-08
+checkpoint_commit: 4f820c4
 completed:
   - 已核对 M08 规范、M07 manager 通知和现有任务状态机
   - 已确认采用版本化交付快照方案
   - 已编写 M08 书面规格
   - 已按 wanxiangAgent.md 校对角色、权限、高风险确认和恢复边界
   - 已编写 M08 测试驱动实施计划
-tests: []
+  - 已实现计划版本、不可变交付快照、验收决定、返工轮次和通知恢复 Worker
+  - 已实现 manager Provider 返工规划恢复、管理员交付 API 和应用生命周期
+  - 已实现高风险事项自动转独立阻塞 Issue，验收不附带授权
+  - 已实现 /deliveries 交付证据、决定历史和返工版本页面
+  - 已通过代码审查并修复通知与返工并发 claim、崩溃恢复、最终 main commit 审计关系
+  - 已补齐工作包、审核、用户决定、高风险证据聚合和广义敏感字段脱密
+  - 已将幂等键绑定快照、决定、意见与管理员身份，并防止任务和快照状态分裂
+  - 已按复审修复返工 plan_version 在 assignment、负责人、workspace 和 MR 授权中的完整作用域
+  - 已增加 step ID 分支隔离、旧 workspace 历史保护和旧版 team_decisions 生产迁移测试
+  - 已补齐返工来源快照上下文、Provider 临时错误退避恢复、快照事务白名单和凭据格式脱敏
+  - 已统一验收内容与 Worker 持久错误的凭据脱敏规则，覆盖 Authorization、JWT、AWS Key 和 URL access token
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/db
+    result: passed
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./internal/deliveries ./internal/planning ./internal/httpapi ./internal/app
+    result: passed
+  - command: npm test -- --run
+    result: 6 files, 15 tests passed
+  - command: npm run build
+    result: passed, chunk-size warning retained
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test -count=1 -timeout=120s ./...
+    result: all packages passed after review fixes
+  - command: GOCACHE=/tmp/wanxiang-go-cache go build -buildvcs=false -o /tmp/wanxiang-m08 ./cmd/wanxiang
+    result: passed
+  - command: 独立代码复审 main..4f820c4
+    result: 原 8 项问题、复审 3 项 Important 和最终持久错误脱敏项均已处理；未发现 Critical
 blockers: []
-next_action: 提交实施计划并创建 feat/mission-08 隔离 worktree，运行后端与 Web 基线测试
+frontend_build_required: true
+frontend_build_result: passed, 6 files and 15 tests passed
+frontend_dist_path: web/dist
+frontend_deployed: false
+backend_build_required: true
+backend_build_result: passed
+backend_restart_required: true
+backend_restarted: false
+backend_restart_reason: 功能分支尚未合并并替换生产二进制
+next_action: 合并 feat/mission-08 到 main，部署前后端并验证 PM2 与 /api/health
 ```
 
 ### M09：测试、重试、回滚和发布编排

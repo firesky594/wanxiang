@@ -197,7 +197,7 @@ func validateAssignment(value AssignmentMetadata) error {
 	if value.ReportsTo != "" && !safeName.MatchString(value.ReportsTo) {
 		return errors.New("invalid reports_to")
 	}
-	want := fmt.Sprintf("agent/%s/%d-%s", value.AgentName, value.TaskID, value.WorkItemKey)
+	want := fmt.Sprintf("agent/%s/%d-%d-%s", value.AgentName, value.TaskID, value.StepID, value.WorkItemKey)
 	if value.BranchName != want {
 		return errors.New("invalid assignment branch")
 	}

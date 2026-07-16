@@ -39,7 +39,7 @@ func (s *Service) GetTaskMatch(ctx context.Context, taskID int64) (MatchView, er
 		return MatchView{}, sql.ErrNoRows
 	}
 	view := MatchView{TaskID: taskID, Decisions: []DecisionView{}, Assignments: []Assignment{}}
-	rows, err := s.db.QueryContext(ctx, `select id,step_id,coalesce(selected_agent,''),score,reasons_json,rejections_json,status from agent_match_decisions where task_id=? order by id`, taskID)
+	rows, err := s.db.QueryContext(ctx, `select md.id,md.step_id,coalesce(md.selected_agent,''),md.score,md.reasons_json,md.rejections_json,md.status from agent_match_decisions md join task_steps ts on ts.id=md.step_id where md.task_id=? and ts.plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?) order by md.id`, taskID, taskID)
 	if err != nil {
 		return MatchView{}, err
 	}
@@ -57,7 +57,7 @@ func (s *Service) GetTaskMatch(ctx context.Context, taskID int64) (MatchView, er
 	if err := rows.Close(); err != nil {
 		return MatchView{}, err
 	}
-	assignmentRows, err := s.db.QueryContext(ctx, `select step_id,agent_name,coalesce(reports_to,'') from task_assignments where task_id=? order by step_id`, taskID)
+	assignmentRows, err := s.db.QueryContext(ctx, `select ta.step_id,ta.agent_name,coalesce(ta.reports_to,'') from task_assignments ta join task_steps ts on ts.id=ta.step_id where ta.task_id=? and ts.plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?) order by ta.step_id`, taskID, taskID)
 	if err != nil {
 		return MatchView{}, err
 	}
@@ -72,7 +72,7 @@ func (s *Service) GetTaskMatch(ctx context.Context, taskID int64) (MatchView, er
 	assignmentRows.Close()
 	var required int
 	var lead sql.NullString
-	err = s.db.QueryRowContext(ctx, `select requires_lead,project_lead,reason from team_decisions where task_id=?`, taskID).Scan(&required, &lead, &view.LeadReason)
+	err = s.db.QueryRowContext(ctx, `select requires_lead,project_lead,reason from team_decisions where task_id=? order by plan_version desc limit 1`, taskID).Scan(&required, &lead, &view.LeadReason)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return MatchView{}, err
 	}

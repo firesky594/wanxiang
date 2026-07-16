@@ -589,7 +589,7 @@ next_action: 合并 feat/mission-08 到 main，部署前后端并验证 PM2 与 
 
 ### M09：测试、重试、回滚和发布编排
 
-**状态：未开始，依赖 M08**
+**状态：已完成，依赖 M08（已满足）**
 
 目标：为不同项目定义可审核的集成测试、有限重试、回滚和发布流程。
 
@@ -607,9 +607,35 @@ next_action: 合并 feat/mission-08 到 main，部署前后端并验证 PM2 与 
 - 发布失败能回到已记录的安全版本。
 - 未经用户确认不会触发生产部署或数据删除。
 
+```yaml
+status: 已完成
+agent: manager
+branch: feat/mission-09-10
+base_commit: 0a4df03
+checkpoint_commit: 7ca6437
+completed:
+  - 从 .wanxiang/pipeline.json 读取严格声明式本机流水线并持久化定义哈希
+  - 按 kind、可执行文件、子命令和参数形状执行无 shell 白名单，子进程使用最小环境
+  - 持久化运行、步骤、尝试、失败分类、阻塞 Issue、事件和重启恢复状态
+  - 测试与构建可有限重试，发布必须单独确认且不自动重放不确定状态
+  - 启动前校验项目干净 main、实际 HEAD 与登记提交一致
+  - 单一发布产物在构建前以预存源 SHA-256、临时副本校验和原子 rename 固化备份
+  - 发布与回滚均通过同一受控 PM2_HOME 核验真实 pm_exec_path、重启应用并检查本机健康端点
+  - 发布执行前再次校验 main、clean、HEAD、定义哈希和构建产物哈希
+  - 增加管理员 API、流水线控制台和高风险二次确认
+tests:
+  - command: GOCACHE=/tmp/wanxiang-go-cache go test ./... && go build ./...
+    result: passed
+  - command: npm test -- --run && npm run build
+    result: 7 files, 17 tests passed；生产构建通过，保留 chunk warning
+risks:
+  - 远端 origin 未验证可信，push 被安全策略拒绝
+next_action: 本机合并 main；部署仍须用户单独确认
+```
+
 ### M10：端到端验收和安全加固
 
-**状态：未开始，依赖 M01 至 M09**
+**状态：待审核，依赖 M01 至 M09（代码依赖已满足）**
 
 目标：证明自然语言任务能够经过完整链路交付，并验证权限、恢复和密钥边界。
 
@@ -628,6 +654,24 @@ next_action: 合并 feat/mission-08 到 main，部署前后端并验证 PM2 与 
 - 后端、前端和端到端测试全部通过。
 - 任务时间线能展示每次规划、分配、checkpoint、中断、恢复、审核和验收。
 - `wanxiangAgentWorkMission.md` 的链路核对、Mission 状态和代码证据按真实实现同步更新；`wanxiangAgent.md` 只保留规范。
+
+```yaml
+status: 待审核
+agent: manager
+branch: feat/mission-09-10
+checkpoint_commit: 7ca6437
+completed:
+  - 增加本机流水线确认、重试、发布失败和回滚端到端夹具
+  - 增加命令注入、最小环境、持久证据脱敏和管理员 API 鉴权测试
+  - 复用并运行 assignments、leases、executor、mr、workspaces、httpapi 的真实跨域安全矩阵
+tests:
+  - command: go test assignments planning leases executor mr workspaces httpapi pipelines e2e 指定安全场景
+    result: passed
+risks:
+  - 现有跨域矩阵尚未形成一个自然语言任务贯穿创建、规划、分配、执行、MR、验收的单夹具，不能将 M10 标记完成
+  - 生产部署必须由用户单独确认
+next_action: 补齐单场景全链路夹具后再完成 M10
+```
 
 ## 5. 当前交接记录
 

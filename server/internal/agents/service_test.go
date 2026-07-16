@@ -72,6 +72,50 @@ func TestSaveAgentConfigStoresSecretPrivatelyAndPreservesIt(t *testing.T) {
 	}
 }
 
+func TestGetAgentConfigRepairsStaleMissingConfigWithoutLosingEnv(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn)
+	if _, err := svc.SaveAgentConfig(t.Context(), AgentConfigInput{Name: "worker-1", ProviderType: "openai", Model: "gpt-5.2", APIKey: "persisted-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`update agent_registry set status='blocked: missing_config' where name='worker-1'`); err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.GetAgentConfig(t.Context(), "worker-1")
+	if err != nil || view.Status != "configured" || !view.SecretConfigured {
+		t.Fatalf("view=%+v err=%v", view, err)
+	}
+	var status string
+	_ = conn.QueryRow(`select status from agent_registry where name='worker-1'`).Scan(&status)
+	body, _ := os.ReadFile(filepath.Join(cfg.AgentDir, "worker-1", "env"))
+	if status != "configured" || !strings.Contains(string(body), "AGENT_API_KEY=persisted-secret") {
+		t.Fatalf("status=%q env not preserved", status)
+	}
+}
+
+func TestGetAgentConfigDoesNotOverwriteRuntimeStatuses(t *testing.T) {
+	for _, status := range []string{"online", "blocked: provider_error"} {
+		t.Run(status, func(t *testing.T) {
+			root := t.TempDir()
+			cfg, _ := config.Load(root)
+			conn := testutil.OpenDB(t)
+			svc := NewService(cfg, conn)
+			if _, err := svc.SaveAgentConfig(t.Context(), AgentConfigInput{Name: "worker-1", ProviderType: "openai", Model: "gpt-5.2", APIKey: "test-key"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.Exec(`update agent_registry set status=? where name='worker-1'`, status); err != nil {
+				t.Fatal(err)
+			}
+			view, err := svc.GetAgentConfig(t.Context(), "worker-1")
+			if err != nil || view.Status != status {
+				t.Fatalf("status=%q view=%+v err=%v", status, view, err)
+			}
+		})
+	}
+}
+
 func TestProbeAgentSelectsConfiguredProviderAndPersistsStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

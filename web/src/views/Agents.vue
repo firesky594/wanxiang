@@ -71,13 +71,17 @@ const defaults: Record<ProviderType, string> = {
   openai: 'https://api.openai.com/v1',
   deepseek: 'https://api.deepseek.com'
 }
+const modelDefaults: Record<ProviderType, string> = {
+  openai: 'gpt-5.2',
+  deepseek: 'deepseek-v4-flash'
+}
 
 const agents = ref<AgentConfig[]>([])
 const selected = ref<AgentConfig | null>(null)
 const loading = ref(false)
 const saving = ref(false)
 const probing = ref(false)
-const form = reactive({ name: '', provider_type: 'openai' as ProviderType, model: '', base_url: defaults.openai, api_key: '' })
+const form = reactive({ name: '', provider_type: 'openai' as ProviderType, model: modelDefaults.openai, base_url: defaults.openai, api_key: '' })
 const editingExisting = computed(() => agents.value.some((agent) => agent.name === form.name))
 const apiKeyPlaceholder = computed(() => selected.value?.secret_configured ? '留空以保留当前密钥' : 'API Key')
 
@@ -96,19 +100,22 @@ function edit(agent: AgentConfig) {
   selected.value = agent
   form.name = agent.name
   form.provider_type = agent.provider_type || 'openai'
-  form.model = agent.model
+  form.model = agent.model || modelDefaults[form.provider_type]
   form.base_url = agent.base_url || defaults[form.provider_type]
   form.api_key = ''
 }
 
 function applyProviderDefault() {
   form.base_url = defaults[form.provider_type]
+  form.model = modelDefaults[form.provider_type]
 }
 
 function resetForm() {
   selected.value = null
-  Object.assign(form, { name: '', provider_type: 'openai', model: '', base_url: defaults.openai, api_key: '' })
+  Object.assign(form, { name: '', provider_type: 'openai', model: modelDefaults.openai, base_url: defaults.openai, api_key: '' })
 }
+
+defineExpose({ form, edit, applyProviderDefault, resetForm })
 
 async function save() {
   if (!form.name.trim() || !form.model.trim() || (!form.api_key.trim() && !selected.value?.secret_configured)) {

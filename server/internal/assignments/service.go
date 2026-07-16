@@ -126,7 +126,7 @@ func (s *Service) AssignTask(ctx context.Context, taskID int64) (Result, error) 
 		return Result{}, err
 	}
 	lead := ""
-	if requiresLead && len(result.Assignments) > 0 {
+	if len(result.Assignments) > 0 {
 		lead = result.Assignments[0].AgentName
 	}
 	if _, err = tx.ExecContext(ctx, `insert into team_decisions(task_id,plan_version,project_lead,requires_lead,reason,created_at) values(?,?,?,?,?,?)`, taskID, version, nullable(lead), boolInt(requiresLead), reason, now()); err != nil {
@@ -143,6 +143,10 @@ func (s *Service) AssignTask(ctx context.Context, taskID int64) (Result, error) 
 		}
 	}
 	if _, err = tx.ExecContext(ctx, `update tasks set status='assigned' where id=?`, taskID); err != nil {
+		return Result{}, err
+	}
+	payload, _ := json.Marshal(map[string]any{"plan_version": version, "assignments": len(result.Assignments), "project_lead": lead, "requires_lead": requiresLead})
+	if _, err = tx.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,'task.assignment.completed','manager',?,?)`, taskID, string(payload), now()); err != nil {
 		return Result{}, err
 	}
 	if err = tx.Commit(); err != nil {

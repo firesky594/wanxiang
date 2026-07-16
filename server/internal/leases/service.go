@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -85,6 +86,10 @@ func (s *Service) Acquire(ctx context.Context, taskID, stepID int64, agent strin
 	}
 	_, err = tx.ExecContext(ctx, `insert into task_step_leases(task_id,step_id,agent_name,lease_id,lease_version,status,acquired_at,expires_at,last_heartbeat_at,created_at,updated_at) values(?,?,?,?,?,'active',?,?,?,?,?)`, taskID, stepID, agent, leaseID, version, formatTime(now), formatTime(expires), formatTime(now), formatTime(now), formatTime(now))
 	if err != nil {
+		return Lease{}, err
+	}
+	payload, _ := json.Marshal(map[string]any{"step_id": stepID, "lease_id": leaseID, "lease_version": version, "expires_at": formatTime(expires)})
+	if _, err = tx.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,'task.step.lease.acquired',?,?,?)`, taskID, agent, string(payload), formatTime(now)); err != nil {
 		return Lease{}, err
 	}
 	if err := tx.Commit(); err != nil {

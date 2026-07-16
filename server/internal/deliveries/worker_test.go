@@ -2,6 +2,7 @@ package deliveries
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,25 @@ import (
 
 	"wanxiang-agent/server/internal/testutil"
 )
+
+func TestReworkWorkerRetriesTemporaryProviderFailure(t *testing.T) {
+	db := testutil.OpenDB(t)
+	_, n := deliveryFixture(t, db)
+	svc := NewService(db, nil)
+	snap, _ := svc.BuildSnapshot(context.Background(), n)
+	result, err := svc.Decide(context.Background(), snap.ID, DecisionInput{Decision: "revision_requested", Comment: "retry", IdempotencyKey: "retry", CreatedBy: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := NewWorker(db, svc, time.Hour, func(context.Context, int64, int64, string) error { return errors.New("provider timeout") })
+	_ = w.Scan(context.Background())
+	var status string
+	var retry any
+	_ = db.QueryRow(`select status,next_retry_at from rework_rounds where id=?`, result.ReworkRound.ID).Scan(&status, &retry)
+	if status != "planning" || retry == nil {
+		t.Fatalf("status=%s retry=%#v", status, retry)
+	}
+}
 
 func TestWorkerConsumesPendingAndRecordsRetry(t *testing.T) {
 	db := testutil.OpenDB(t)

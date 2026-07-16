@@ -2,6 +2,7 @@ package deliveries
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -93,6 +94,35 @@ func TestDecisionIdempotencyKeyCannotCrossSnapshotOrActor(t *testing.T) {
 	}
 	if _, err = svc.Decide(context.Background(), snap.ID+1, DecisionInput{Decision: "accepted", IdempotencyKey: "shared", CreatedBy: "admin-b"}); err == nil {
 		t.Fatal("cross-snapshot/actor idempotency key was accepted")
+	}
+}
+
+func TestDecisionCommentIsScrubbedBeforePersistenceAndResponse(t *testing.T) {
+	db := testutil.OpenDB(t)
+	_, n := deliveryFixture(t, db)
+	svc := NewService(db, nil)
+	snap, _ := svc.BuildSnapshot(context.Background(), n)
+	result, err := svc.Decide(context.Background(), snap.ID, DecisionInput{Decision: "revision_requested", Comment: "token=super-secret", IdempotencyKey: "scrub", CreatedBy: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision.Comment != "[REDACTED]" {
+		t.Fatalf("comment=%q", result.Decision.Comment)
+	}
+	detail, _ := svc.Detail(context.Background(), snap.ID)
+	if detail.Decisions[0].Comment != "[REDACTED]" {
+		t.Fatalf("detail=%q", detail.Decisions[0].Comment)
+	}
+}
+
+func TestScrubCoversCredentialFormats(t *testing.T) {
+	for _, value := range []string{
+		"Authorization=Basic abc123", "AWS_ACCESS_KEY_ID=AKIAEXAMPLE", "https://example.test?a=1&access_token=secret",
+		"eyJabcdefghijk.abcdefghijk.abcdefghijk",
+	} {
+		if got := scrub(value); strings.Contains(got, "abc123") || strings.Contains(got, "AKIAEXAMPLE") || strings.Contains(got, "secret") || strings.Contains(got, "eyJ") {
+			t.Fatalf("not scrubbed: %q -> %q", value, got)
+		}
 	}
 }
 

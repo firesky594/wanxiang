@@ -13,6 +13,7 @@ func (s *Service) Decide(ctx context.Context, snapshotID int64, in DecisionInput
 		return DecisionResult{}, errors.New("invalid_decision")
 	}
 	in.Comment = strings.TrimSpace(in.Comment)
+	in.Comment = scrub(in.Comment)
 	in.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
 	if (in.Decision == "rejected" || in.Decision == "revision_requested") && in.Comment == "" {
 		return DecisionResult{}, ErrDecisionCommentRequired

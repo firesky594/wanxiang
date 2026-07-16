@@ -42,6 +42,43 @@ func TestAssignTaskPersistsDecisionsAssignmentsAndLeadIdempotently(t *testing.T)
 	}
 }
 
+func TestAssignTaskAssignsNewestReworkPlanWithoutReusingOldAssignments(t *testing.T) {
+	cfg, conn, taskID := assignmentFixture(t)
+	writeAgent(t, cfg, "api-agent", "backend", []string{"go"}, 1)
+	writeAgent(t, cfg, "web-agent", "frontend", []string{"vue"}, 1)
+	registerAgent(t, conn, cfg, "api-agent", "backend", "online")
+	registerAgent(t, conn, cfg, "web-agent", "frontend", "online")
+	svc := NewService(cfg, conn)
+	if _, err := svc.AssignTask(t.Context(), taskID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`update task_assignments set status='completed' where task_id=?`, taskID); err != nil {
+		t.Fatal(err)
+	}
+	item := planning.WorkItem{Key: "fix", Title: "Fix", Kind: "backend", RequiredCapabilities: []string{"go"}}
+	input, _ := json.Marshal(item)
+	if _, err := conn.Exec(`insert into task_plan_versions(task_id,version,status,summary,created_at) values(?,2,'planned','rework','now')`, taskID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`insert into task_steps(task_id,agent_name,kind,status,input,created_at,plan_version) values(?,'unassigned','backend','created',?,'now',2)`, taskID, input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`update tasks set status='planned' where id=?`, taskID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.AssignTask(t.Context(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Assignments) != 1 {
+		t.Fatalf("assignments=%+v", result.Assignments)
+	}
+	var decisions int
+	if err := conn.QueryRow(`select count(*) from team_decisions where task_id=?`, taskID).Scan(&decisions); err != nil || decisions != 2 {
+		t.Fatalf("decisions=%d err=%v", decisions, err)
+	}
+}
+
 func TestAssignTaskCreatesNonSecretBlockedAgentWhenNoCandidate(t *testing.T) {
 	cfg, conn, taskID := assignmentFixture(t)
 	if _, err := conn.Exec(`delete from task_steps where task_id=? and kind='frontend'`, taskID); err != nil {

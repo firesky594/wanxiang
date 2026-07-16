@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -89,6 +90,26 @@ func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snap
 		return Snapshot{}, err
 	}
 	defer tx.Rollback()
+	var taskStatus string
+	var currentVersion, stepCount, txIncomplete, txUnmerged, txBlockers int64
+	if err = tx.QueryRowContext(ctx, `select status from tasks where id=?`, taskID).Scan(&taskStatus); err != nil {
+		return Snapshot{}, err
+	}
+	if taskStatus != "merged" && taskStatus != "workspace_ready" {
+		return Snapshot{}, ErrNotReady
+	}
+	if err = tx.QueryRowContext(ctx, `select coalesce(max(version),1) from task_plan_versions where task_id=?`, taskID).Scan(&currentVersion); err != nil || currentVersion != planVersion {
+		return Snapshot{}, ErrNotReady
+	}
+	if err = tx.QueryRowContext(ctx, `select count(*),sum(case when status!='completed' then 1 else 0 end) from task_steps where task_id=? and plan_version=?`, taskID, planVersion).Scan(&stepCount, &txIncomplete); err != nil || stepCount == 0 || txIncomplete > 0 {
+		return Snapshot{}, ErrNotReady
+	}
+	if err = tx.QueryRowContext(ctx, `select count(*) from task_steps st where st.task_id=? and st.plan_version=? and not exists(select 1 from merge_requests mr where mr.task_id=st.task_id and mr.step_id=st.id and mr.status='merged')`, taskID, planVersion).Scan(&txUnmerged); err != nil || txUnmerged > 0 {
+		return Snapshot{}, ErrNotReady
+	}
+	if err = tx.QueryRowContext(ctx, `select count(*) from issues where task_id=? and blocking=1 and status not in ('resolved','closed')`, taskID).Scan(&txBlockers); err != nil || txBlockers > 0 {
+		return Snapshot{}, ErrNotReady
+	}
 	res, err := tx.ExecContext(ctx, `insert into delivery_snapshots(task_id,project_id,version,manager_notification_id,main_commit,status,summary,summary_hash,evidence_json,created_by,created_at) values(?,?,?,?,?,'awaiting_acceptance',?,?,?,'manager',?)`, taskID, projectID, version, notificationID, mainCommit, summary, hash, string(encoded), now)
 	if err != nil {
 		if item, findErr := s.snapshotByNotification(ctx, notificationID); findErr == nil {
@@ -116,7 +137,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snap
 			return Snapshot{}, err
 		}
 	}
-	for _, risk := range evidence.Risks {
+	for _, risk := range evidence.HighRisk {
 		if isHighRisk(risk) {
 			title := fmt.Sprintf("交付版本 %d 高风险事项需单独确认", version)
 			if _, err = tx.ExecContext(ctx, `insert into issues(task_id,title,body,status,blocking,created_by,created_at) values(?,?,?,'blocking',1,'manager',?)`, taskID, title, risk, now); err != nil {
@@ -127,8 +148,12 @@ func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snap
 	if _, err = tx.ExecContext(ctx, `update manager_notifications set status='consumed',consumed_at=?,processing_started_at=null,last_error='',next_retry_at=null where task_id=? and status in ('pending','processing')`, now, taskID); err != nil {
 		return Snapshot{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `update tasks set status='awaiting_acceptance' where id=?`, taskID); err != nil {
+	updated, err := tx.ExecContext(ctx, `update tasks set status='awaiting_acceptance' where id=? and status=?`, taskID, taskStatus)
+	if err != nil {
 		return Snapshot{}, err
+	}
+	if changed, _ := updated.RowsAffected(); changed != 1 {
+		return Snapshot{}, ErrNotReady
 	}
 	payload, _ := json.Marshal(map[string]any{"snapshot_id": id, "version": version, "main_commit": mainCommit})
 	if _, err = tx.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,'delivery.snapshot.created','manager',?,?)`, taskID, string(payload), now); err != nil {
@@ -227,6 +252,23 @@ func (s *Service) collectEvidence(ctx context.Context, taskID, planVersion int64
 		result.Reviews = append(result.Reviews, r)
 	}
 	reviewRows.Close()
+	all := append([]string{}, result.Risks...)
+	all = append(all, result.Incomplete...)
+	all = append(all, result.UserDecisions...)
+	for _, test := range result.Tests {
+		all = append(all, test.Command, test.Summary)
+	}
+	for _, work := range result.WorkItems {
+		all = append(all, string(work.Input))
+	}
+	seen := map[string]bool{}
+	result.HighRisk = result.HighRisk[:0]
+	for _, value := range all {
+		if isHighRisk(value) && !seen[value] {
+			result.HighRisk = append(result.HighRisk, value)
+			seen[value] = true
+		}
+	}
 	return result, reviewRows.Err()
 }
 
@@ -268,7 +310,7 @@ func redactError(err error) string {
 
 func isHighRisk(value string) bool {
 	lower := strings.ToLower(value)
-	for _, word := range []string{"部署", "生产", "删除", "删库", "迁移", "权限", "密钥", "secret", "deploy", "production"} {
+	for _, word := range []string{"部署", "生产", "删除", "删库", "迁移", "权限", "扩权", "密钥", "secret", "credential", "deploy", "production", "drop table", "truncate table"} {
 		if strings.Contains(lower, word) {
 			return true
 		}
@@ -278,13 +320,16 @@ func isHighRisk(value string) bool {
 
 func scrub(value string) string {
 	lower := strings.ToLower(value)
-	for _, marker := range []string{"bearer ", "bearer:", "sk-", "api_key=", "api-key=", "token=", "password=", "secret=", "access_key=", "private_key="} {
+	for _, marker := range []string{"authorization=", "authorization:", "bearer ", "bearer:", "sk-", "api_key=", "api-key=", "apikey=", "token=", "access_token=", "password=", "secret=", "access_key=", "private_key=", "aws_access_key_id=", "aws_secret_access_key="} {
 		if i := strings.Index(lower, marker); i >= 0 {
 			return value[:i] + "[REDACTED]"
 		}
 	}
+	value = jwtPattern.ReplaceAllString(value, "[REDACTED]")
 	return value
 }
+
+var jwtPattern = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b`)
 
 func sanitizeJSON(raw string) json.RawMessage {
 	var value any
@@ -370,6 +415,7 @@ func (s *Service) Detail(ctx context.Context, id int64) (Detail, error) {
 			return Detail{}, err
 		}
 		detail.Decisions = append(detail.Decisions, d)
+		detail.Decisions[len(detail.Decisions)-1].Comment = scrub(detail.Decisions[len(detail.Decisions)-1].Comment)
 	}
 	rows.Close()
 	rounds, err := s.ListRework(ctx, snap.TaskID)

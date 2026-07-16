@@ -29,7 +29,7 @@ func (s *Service) authorizeSubmission(ctx context.Context, principal Principal, 
 		join task_step_leases l on l.task_id=ta.task_id and l.step_id=ta.step_id and l.agent_name=ta.agent_name
 		join project_workspaces pw on pw.task_id=ta.task_id and pw.step_id=ta.step_id and pw.agent_name=ta.agent_name
 		left join task_checkpoints cp on cp.id=(select id from task_checkpoints where task_id=ta.task_id and step_id=ta.step_id and lease_id=l.lease_id order by id desc limit 1)
-		left join team_decisions td on td.task_id=ta.task_id
+		left join team_decisions td on td.task_id=ta.task_id and td.plan_version=(select plan_version from task_steps where id=ta.step_id)
 		where ta.task_id=? and ta.step_id=?`, input.TaskID, input.StepID).Scan(&owner, &leaseID, &leaseVersion, &leaseStatus, &expiresAt, &projectID, &branch, &worktree, &checkpointCommit, &checkpointBranch, &projectLead)
 	if errors.Is(err, sql.ErrNoRows) || owner != principal.Name {
 		return submissionContext{}, ErrIdentityMismatch

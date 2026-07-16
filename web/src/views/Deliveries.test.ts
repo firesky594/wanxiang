@@ -18,6 +18,8 @@ describe('delivery acceptance console', () => {
     expect(view).toContain('submitDecision')
     expect(view).toContain('submitting')
     expect(view).toContain('拒绝或要求调整时必须填写意见')
+		expect(view).toContain('decisionKey')
+		expect(view).not.toContain('crypto.randomUUID()}`')
     expect(view).not.toContain('/api/agent/')
   })
 })

@@ -38,7 +38,7 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`create table if not exists audit_logs (id integer primary key, actor text not null, action text not null, target text not null, payload_json text not null, created_at text not null)`,
 		`create table if not exists agent_match_decisions (id integer primary key, task_id integer not null, step_id integer not null, selected_agent text, score real not null default 0, reasons_json text not null, rejections_json text not null, created_by text not null, status text not null, created_at text not null)`,
 		`create table if not exists task_assignments (id integer primary key, task_id integer not null, step_id integer not null unique, agent_name text not null, reports_to text, status text not null, decision_id integer not null, created_at text not null)`,
-		`create table if not exists team_decisions (id integer primary key, task_id integer not null unique, project_lead text, requires_lead integer not null default 0, reason text not null, created_at text not null)`,
+		`create table if not exists team_decisions (id integer primary key, task_id integer not null, plan_version integer not null default 1, project_lead text, requires_lead integer not null default 0, reason text not null, created_at text not null, unique(task_id,plan_version))`,
 		`create table if not exists project_workspaces (id integer primary key, project_id integer not null, task_id integer not null, step_id integer not null unique, assignment_id integer not null, agent_name text not null, reports_to text, branch_name text not null unique, worktree_path text not null unique, base_commit text not null, provision_commit text not null default '', write_scope_json text not null, metadata_hash text not null, status text not null, last_error text not null default '', created_at text not null, updated_at text not null, cleaned_at text)`,
 		`create table if not exists task_step_leases (id integer primary key, task_id integer not null, step_id integer not null, agent_name text not null, lease_id text not null unique, lease_version integer not null, status text not null, branch_name text not null default '', worktree_path text not null default '', acquired_at text not null, expires_at text not null, last_heartbeat_at text, interrupted_at text, resume_deadline text, revoked_at text, revoked_reason text not null default '', created_at text not null, updated_at text not null, unique(step_id, lease_version))`,
 		`create index if not exists idx_task_step_leases_step_status on task_step_leases(step_id, status)`,
@@ -108,10 +108,39 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			return err
 		}
 	}
+	if err := migrateTeamDecisions(ctx, conn); err != nil {
+		return err
+	}
 	if _, err := conn.ExecContext(ctx, `create unique index if not exists idx_merge_requests_report_id on merge_requests(report_id) where report_id is not null`); err != nil {
 		return err
 	}
 	return nil
+}
+
+func migrateTeamDecisions(ctx context.Context, conn *sql.DB) error {
+	var hasVersion int
+	if err := conn.QueryRowContext(ctx, `select count(*) from pragma_table_info('team_decisions') where name='plan_version'`).Scan(&hasVersion); err != nil {
+		return err
+	}
+	if hasVersion > 0 {
+		return nil
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`alter table team_decisions rename to team_decisions_legacy`,
+		`create table team_decisions (id integer primary key, task_id integer not null, plan_version integer not null default 1, project_lead text, requires_lead integer not null default 0, reason text not null, created_at text not null, unique(task_id,plan_version))`,
+		`insert into team_decisions(id,task_id,plan_version,project_lead,requires_lead,reason,created_at) select id,task_id,1,project_lead,requires_lead,reason,created_at from team_decisions_legacy`,
+		`drop table team_decisions_legacy`,
+	} {
+		if _, err = tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func ensureColumn(ctx context.Context, conn *sql.DB, table, column, definition string) error {

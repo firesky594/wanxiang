@@ -81,7 +81,12 @@ func (s *Service) PlanRework(ctx context.Context, taskID, version int64, reason 
 	if task.Status != "rework_planning" {
 		return Plan{}, fmt.Errorf("task status %q cannot be reworked", task.Status)
 	}
-	task.Description += "\n\n用户返工意见：" + reason
+	var snapshotSummary, evidence string
+	err = s.db.QueryRowContext(ctx, `select ds.summary,ds.evidence_json from task_plan_versions pv join delivery_snapshots ds on ds.id=pv.source_snapshot_id where pv.task_id=? and pv.version=?`, taskID, version).Scan(&snapshotSummary, &evidence)
+	if err != nil {
+		return Plan{}, fmt.Errorf("load rework source snapshot: %w", err)
+	}
+	task.Description += "\n\n返工来源交付：" + snapshotSummary + "\n返工交付证据(JSON)：" + evidence + "\n用户返工意见：" + reason
 	messages, err := BuildMessages(filepath.Join(s.cfg.AgentDir, "manager"), task)
 	if err != nil {
 		return Plan{}, err

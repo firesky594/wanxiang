@@ -31,6 +31,31 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 	}
 }
 
+func TestMigrateUpgradesLegacyTeamDecisionUniqueness(t *testing.T) {
+	conn, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err = conn.Exec(`create table team_decisions (id integer primary key, task_id integer not null unique, project_lead text, requires_lead integer not null default 0, reason text not null, created_at text not null)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(`insert into team_decisions(task_id,project_lead,requires_lead,reason,created_at) values(1,'lead',1,'old','now')`); err != nil {
+		t.Fatal(err)
+	}
+	if err = Migrate(t.Context(), conn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(`insert into team_decisions(task_id,plan_version,project_lead,requires_lead,reason,created_at) values(1,2,'lead',1,'rework','now')`); err != nil {
+		t.Fatalf("version 2 rejected: %v", err)
+	}
+	var count int
+	_ = conn.QueryRow(`select count(*) from team_decisions where task_id=1`).Scan(&count)
+	if count != 2 {
+		t.Fatalf("count=%d", count)
+	}
+}
+
 func TestMission07MigrationCreatesReportReviewAndNotificationSchema(t *testing.T) {
 	conn, err := Open(":memory:")
 	if err != nil {

@@ -118,7 +118,7 @@ func (s *Service) ProvisionTask(ctx context.Context, taskID int64) (workspace Ta
 			records = recovery.Items
 			recovering = true
 			base = recovery.Items[0].BaseCommit
-			_, err = s.db.ExecContext(ctx, `update project_workspaces set status='provisioning',last_error='',updated_at=? where task_id=?`, created, taskID)
+			_, err = s.db.ExecContext(ctx, `update project_workspaces set status='provisioning',last_error='',updated_at=? where task_id=? and step_id in (select id from task_steps where task_id=? and plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?))`, created, taskID, taskID, taskID)
 			if err != nil {
 				return TaskWorkspace{}, err
 			}
@@ -128,7 +128,7 @@ func (s *Service) ProvisionTask(ctx context.Context, taskID int64) (workspace Ta
 		if recovering {
 			break
 		}
-		branchName := fmt.Sprintf("agent/%s/%d-%s", source.AgentName, taskID, source.Item.Key)
+		branchName := fmt.Sprintf("agent/%s/%d-%d-%s", source.AgentName, taskID, source.StepID, source.Item.Key)
 		worktreePath := filepath.Join(s.cfg.DataDir, "worktrees", fmt.Sprintf("task-%d", taskID), fmt.Sprintf("step-%d-%s", source.StepID, source.AgentName))
 		metadata := AssignmentMetadata{MetadataVersion: 1, TaskID: taskID, StepID: source.StepID, AssignmentID: source.AssignmentID, WorkItemKey: source.Item.Key, AgentName: source.AgentName, ReportsTo: source.ReportsTo, BranchName: branchName, WorktreeID: fmt.Sprintf("task-%d-step-%d", taskID, source.StepID), BaseCommit: base, WriteScope: []string{"."}, Status: "ready"}
 		_, hash, encodeErr := EncodeAssignment(metadata)
@@ -161,7 +161,7 @@ func (s *Service) ProvisionTask(ctx context.Context, taskID int64) (workspace Ta
 		if err != nil {
 			return TaskWorkspace{}, err
 		}
-		if _, err = s.db.ExecContext(ctx, `update project_workspaces set provision_commit=?,updated_at=? where task_id=?`, provision, timestamp(), taskID); err != nil {
+		if _, err = s.db.ExecContext(ctx, `update project_workspaces set provision_commit=?,updated_at=? where task_id=? and step_id in (select id from task_steps where task_id=? and plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?))`, provision, timestamp(), taskID, taskID, taskID); err != nil {
 			return TaskWorkspace{}, err
 		}
 	}
@@ -172,7 +172,7 @@ func (s *Service) ProvisionTask(ctx context.Context, taskID int64) (workspace Ta
 		}
 	}
 	now := timestamp()
-	if _, err = s.db.ExecContext(ctx, `update project_workspaces set status='ready',last_error='',updated_at=? where task_id=?`, now, taskID); err != nil {
+	if _, err = s.db.ExecContext(ctx, `update project_workspaces set status='ready',last_error='',updated_at=? where task_id=? and step_id in (select id from task_steps where task_id=? and plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?))`, now, taskID, taskID, taskID); err != nil {
 		return TaskWorkspace{}, err
 	}
 	if _, err = s.db.ExecContext(ctx, `update projects set main_commit=? where id=?`, provision, projectID); err != nil {
@@ -190,7 +190,7 @@ func (s *Service) GetTask(ctx context.Context, taskID int64) (TaskWorkspace, err
 	if err := s.db.QueryRowContext(ctx, `select p.id,p.slug from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&result.ProjectID, &result.ProjectSlug); err != nil {
 		return TaskWorkspace{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `select id,step_id,assignment_id,agent_name,coalesce(reports_to,''),branch_name,worktree_path,base_commit,provision_commit,write_scope_json,metadata_hash,status,last_error from project_workspaces where task_id=? order by step_id`, taskID)
+	rows, err := s.db.QueryContext(ctx, `select pw.id,pw.step_id,pw.assignment_id,pw.agent_name,coalesce(pw.reports_to,''),pw.branch_name,pw.worktree_path,pw.base_commit,pw.provision_commit,pw.write_scope_json,pw.metadata_hash,pw.status,pw.last_error from project_workspaces pw join task_steps ts on ts.id=pw.step_id where pw.task_id=? and ts.plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?) order by pw.step_id`, taskID, taskID)
 	if err != nil {
 		return TaskWorkspace{}, err
 	}
@@ -229,7 +229,7 @@ func (s *Service) existingReady(ctx context.Context, taskID int64) (TaskWorkspac
 	return result, result.Status == "ready", nil
 }
 func (s *Service) loadSources(ctx context.Context, taskID int64) ([]assignmentSource, error) {
-	rows, err := s.db.QueryContext(ctx, `select ta.id,ta.step_id,ta.agent_name,coalesce(ta.reports_to,''),ts.input from task_assignments ta join task_steps ts on ts.id=ta.step_id where ta.task_id=? order by ta.step_id`, taskID)
+	rows, err := s.db.QueryContext(ctx, `select ta.id,ta.step_id,ta.agent_name,coalesce(ta.reports_to,''),ts.input from task_assignments ta join task_steps ts on ts.id=ta.step_id where ta.task_id=? and ts.plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?) order by ta.step_id`, taskID, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (s *Service) loadSources(ctx context.Context, taskID int64) ([]assignmentSo
 }
 func (s *Service) writeMetadata(ctx context.Context, projectDir, slug string, taskID int64, sources []assignmentSource, base string) error {
 	lead := ""
-	_ = s.db.QueryRowContext(ctx, `select coalesce(project_lead,'') from team_decisions where task_id=?`, taskID).Scan(&lead)
+	_ = s.db.QueryRowContext(ctx, `select coalesce(project_lead,'') from team_decisions where task_id=? order by plan_version desc limit 1`, taskID).Scan(&lead)
 	agents := make([]ProjectAgent, 0, len(sources))
 	for _, source := range sources {
 		agents = append(agents, ProjectAgent{Name: source.AgentName, ReportsTo: source.ReportsTo})
@@ -268,7 +268,7 @@ func (s *Service) writeMetadata(ctx context.Context, projectDir, slug string, ta
 		return err
 	}
 	for _, source := range sources {
-		branch := fmt.Sprintf("agent/%s/%d-%s", source.AgentName, taskID, source.Item.Key)
+		branch := fmt.Sprintf("agent/%s/%d-%d-%s", source.AgentName, taskID, source.StepID, source.Item.Key)
 		encoded, _, err := EncodeAssignment(AssignmentMetadata{MetadataVersion: 1, TaskID: taskID, StepID: source.StepID, AssignmentID: source.AssignmentID, WorkItemKey: source.Item.Key, AgentName: source.AgentName, ReportsTo: source.ReportsTo, BranchName: branch, WorktreeID: fmt.Sprintf("task-%d-step-%d", taskID, source.StepID), BaseCommit: base, WriteScope: []string{"."}, Status: "ready"})
 		if err != nil {
 			return err
@@ -307,7 +307,7 @@ func (s *Service) failTask(ctx context.Context, taskID int64, cause error) {
 	if len(message) > 500 {
 		message = message[:500]
 	}
-	_, _ = s.db.ExecContext(ctx, `update project_workspaces set status='failed',last_error=?,updated_at=? where task_id=?`, message, timestamp(), taskID)
+	_, _ = s.db.ExecContext(ctx, `update project_workspaces set status='failed',last_error=?,updated_at=? where task_id=? and step_id in (select id from task_steps where task_id=? and plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?))`, message, timestamp(), taskID, taskID, taskID)
 }
 func (s *Service) projectLock(projectID int64) *sync.Mutex {
 	s.lockMu.Lock()

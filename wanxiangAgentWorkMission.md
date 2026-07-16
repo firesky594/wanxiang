@@ -635,7 +635,7 @@ next_action: 本机合并 main；部署仍须用户单独确认
 
 ### M10：端到端验收和安全加固
 
-**状态：待审核，依赖 M01 至 M09（代码依赖已满足）**
+**状态：已完成，依赖 M01 至 M09（已满足）**
 
 目标：证明自然语言任务能够经过完整链路交付，并验证权限、恢复和密钥边界。
 
@@ -656,21 +656,28 @@ next_action: 本机合并 main；部署仍须用户单独确认
 - `wanxiangAgentWorkMission.md` 的链路核对、Mission 状态和代码证据按真实实现同步更新；`wanxiangAgent.md` 只保留规范。
 
 ```yaml
-status: 待审核
+status: 已完成
 agent: manager
 branch: feat/mission-09-10
-checkpoint_commit: 7ca6437
+checkpoint_commit: 48458f6
 completed:
   - 增加本机流水线确认、重试、发布失败和回滚端到端夹具
   - 增加命令注入、最小环境、持久证据脱敏和管理员 API 鉴权测试
   - 复用并运行 assignments、leases、executor、mr、workspaces、httpapi 的真实跨域安全矩阵
+  - 单一自然语言任务使用真实规划、分配、workspace、lease、checkpoint、报告、审核、no-ff 合并、交付快照和用户验收服务贯穿完成
+  - 单 Agent 始终使用 agent_registry 的 backend 身份，由 team_decisions 中的负责人名称授权审核与合并
+  - 时间线严格按创建、规划、分配、workspace、lease、checkpoint、MR、合并、快照、验收顺序核对
+  - 修复单 Agent 未登记 project_lead 与 Acquire 未写租约事件的链路缺口
 tests:
-  - command: go test assignments planning leases executor mr workspaces httpapi pipelines e2e 指定安全场景
+  - command: GOCACHE=/tmp/wanxiang-m10-final go test ./... && go build ./...
     result: passed
+  - command: npm test -- --run && npm run build
+    result: 7 files, 17 tests passed；生产构建通过，保留 chunk warning
+  - command: 独立复审 feat/mission-10-final 相对 d9f9bfa
+    result: Critical 0；Important 0
 risks:
-  - 现有跨域矩阵尚未形成一个自然语言任务贯穿创建、规划、分配、执行、MR、验收的单夹具，不能将 M10 标记完成
   - 生产部署必须由用户单独确认
-next_action: 补齐单场景全链路夹具后再完成 M10
+next_action: 本机合并 main；部署仍须用户单独确认
 ```
 
 ## 5. 当前交接记录

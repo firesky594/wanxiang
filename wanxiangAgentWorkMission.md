@@ -46,34 +46,34 @@ next_action: 下一项可立即执行的动作
 
 ## 2. 当前链路核对
 
-| 链路节点 | 状态 | 当前实现和缺口 |
-| --- | --- | --- |
-| 管理员初始化、登录和会话 | 已实现 | `server/internal/httpapi/handlers_auth.go` 和 `auth/` 已覆盖 |
-| 用户提交任务 | 已实现 | 可新建项目或按已登记项目 ID 复用，复用前校验路径、main 分支和干净状态 |
-| 总管理解目标和拆分工作包 | 已实现 | planning Worker 调用 manager Provider 并校验结构化规划 |
-| 生成工作包和依赖图 | 已实现 | 规划结果事务化写入 `task_steps`、`workflow_edges`、摘要和事件 |
-| 估算 Agent 数量和并发度 | 部分实现 | 匹配时按工作包和 `max_concurrency` 分配；尚无独立估算结果 |
-| 决定动态项目负责人 | 部分实现 | 已持久化负责人和汇报关系；后续补充执行期替换与权限逻辑 |
-| 匹配 Agent | 已实现 | 按在线状态、能力、Skill、MCP、项目权限、并发和负载过滤并解释评分 |
-| 创建缺失 Agent | 已实现 | 无候选时生成不含密钥的 Agent 骨架并进入 `blocked: missing_config` |
-| Provider 真实探测 | 已实现 | OpenAI 和 DeepSeek 均有适配器和测试 |
-| 配置完成后恢复调度 | 部分实现 | planning 和 matching 均可自动恢复；执行、审核阶段待后续 Mission 接入 |
-| 创建或选择 Project | 已实现 | 管理台与后端支持新建或按数据库 ID 复用已有项目，不接受任意客户端路径 |
-| `project.yaml` 和 assignments | 已实现 | 数据库运行状态与 `.wanxiang/` Git 快照双向印证，漂移不静默覆盖 |
-| Agent 独立分支和 worktree | 已实现 | 自动创建独立分支/worktree，登记双提交、范围和状态，支持校验与确认清理 |
-| Agent 任务租约和断点恢复 | 已实现 | 已有任务级租约、心跳、Git checkpoint、短摘要、过期扫描、原 Agent 恢复和安全接管 |
-| 启动执行 Agent | 未实现 | Launcher 只执行 Provider 探测和心跳，不启动 Codex、CLI 或 Agent 进程 |
-| Agent 消费任务并修改代码 | 未实现 | 没有任务队列、命令执行器或项目写入协议 |
-| Token 用量、记忆和日志 | 部分实现 | 有写入接口；没有与任务租约和 scope 绑定 |
-| 完成报告 | 未实现 | 没有结构化报告、测试证据和交接摘要服务 |
-| 创建 MR | 部分实现 | Agent API 可创建；管理台使用管理员会话调用 Agent API，鉴权不通 |
-| 阻塞 Issue | 已实现 | 管理员可创建，阻塞 Issue 会阻止 MR 合并 |
-| 项目负责人审核 | 未实现 | 当前只有身份为 `manager` 的 Agent 能合并 `main` |
-| 本地合并 | 已实现 | 校验分支和干净工作区，使用 `--no-ff`，冲突后 abort |
-| 总管汇总和用户验收 | 未实现 | 没有结果汇总、验收或返工状态流转 |
-| 自动测试、重试、回滚和发布 | 未实现 | 没有编排服务 |
-| 查询列表和刷新恢复 | 已实现 | 管理员 API 提供任务、项目、MR、Issue 和事件查询；任务页先加载持久快照再连接 SSE |
-| Agent scope 权限 | 部分实现 | workspace ownership 已校验 Agent、task、step 和路径范围；M05 写接口继续叠加 lease 与 token scope |
+| 链路节点                        | 状态     | 当前实现和缺口                                                                  |
+| ------------------------------- | -------- | ------------------------------------------------------------------------------- |
+| 管理员初始化、登录和会话        | 已实现   | `server/internal/httpapi/handlers_auth.go` 和 `auth/` 已覆盖                     |
+| 用户提交任务                    | 已实现   | 可新建项目或按已登记项目 ID 复用，复用前校验路径、main 分支和干净状态           |
+| 总管理解目标和拆分工作包        | 已实现   | planning Worker 调用 manager Provider 并校验结构化规划                          |
+| 生成工作包和依赖图              | 已实现   | 规划结果事务化写入 `task_steps`、`workflow_edges`、摘要和事件                   |
+| 估算 Agent 数量和并发度         | 部分实现 | 匹配时按工作包和 `max_concurrency` 分配；尚无独立估算结果                       |
+| 决定动态项目负责人              | 部分实现 | 已持久化负责人和汇报关系；后续补充执行期替换与权限逻辑                          |
+| 匹配 Agent                      | 已实现   | 按在线状态、能力、Skill、MCP、项目权限、并发和负载过滤并解释评分                |
+| 创建缺失 Agent                  | 已实现   | 无候选时生成不含密钥的 Agent 骨架并进入 `blocked: missing_config`               |
+| Provider 真实探测               | 已实现   | OpenAI 和 DeepSeek 均有适配器和测试                                             |
+| 配置完成后恢复调度              | 部分实现 | planning 和 matching 均可自动恢复；执行、审核阶段待后续 Mission 接入            |
+| 创建或选择 Project              | 已实现   | 管理台与后端支持新建或按数据库 ID 复用已有项目，不接受任意客户端路径            |
+| `project.yaml` 和 assignments   | 已实现   | 数据库运行状态与 `.wanxiang/` Git 快照双向印证，漂移不静默覆盖                  |
+| Agent 独立分支和 worktree       | 已实现   | 自动创建独立分支/worktree，登记双提交、范围和状态，支持校验与确认清理           |
+| Agent 任务租约和断点恢复        | 已实现   | 已有任务级租约、心跳、Git checkpoint、短摘要、过期扫描、原 Agent 恢复和安全接管 |
+| 启动执行 Agent                  | 未实现   | Launcher 只执行 Provider 探测和心跳，不启动 Codex、CLI 或 Agent 进程            |
+| Agent 消费任务并修改代码        | 未实现   | 没有任务队列、命令执行器或项目写入协议                                          |
+| Token 用量、记忆和日志          | 部分实现 | 有写入接口；没有与任务租约和 scope 绑定                                         |
+| 完成报告                        | 未实现   | 没有结构化报告、测试证据和交接摘要服务                                          |
+| 创建 MR                         | 部分实现 | Agent API 可创建；管理台使用管理员会话调用 Agent API，鉴权不通                  |
+| 阻塞 Issue                      | 已实现   | 管理员可创建，阻塞 Issue 会阻止 MR 合并                                         |
+| 项目负责人审核                  | 未实现   | 当前只有身份为 `manager` 的 Agent 能合并 `main`                                 |
+| 本地合并                        | 已实现   | 校验分支和干净工作区，使用 `--no-ff`，冲突后 abort                              |
+| 总管汇总和用户验收              | 未实现   | 没有结果汇总、验收或返工状态流转                                                |
+| 自动测试、重试、回滚和发布      | 未实现   | 没有编排服务                                                                    |
+| 查询列表和刷新恢复              | 已实现   | 管理员 API 提供任务、项目、MR、Issue 和事件查询；任务页先加载持久快照再连接 SSE |
+| Agent scope 权限                | 部分实现 | workspace ownership 已校验 Agent、task、step 和路径范围；M05 继续叠加 lease     |
 
 当前实际链路停在：
 

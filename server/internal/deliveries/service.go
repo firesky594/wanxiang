@@ -296,12 +296,7 @@ func redactError(err error) string {
 	if err == nil {
 		return ""
 	}
-	value := err.Error()
-	for _, marker := range []string{"sk-", "Bearer ", "api_key"} {
-		if i := strings.Index(strings.ToLower(value), strings.ToLower(marker)); i >= 0 {
-			value = value[:i] + "[REDACTED]"
-		}
-	}
+	value := scrub(err.Error())
 	if len(value) > 1024 {
 		value = value[:1024]
 	}

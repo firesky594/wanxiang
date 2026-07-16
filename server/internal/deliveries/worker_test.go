@@ -3,6 +3,7 @@ package deliveries
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,13 +21,18 @@ func TestReworkWorkerRetriesTemporaryProviderFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := NewWorker(db, svc, time.Hour, func(context.Context, int64, int64, string) error { return errors.New("provider timeout") })
+	w := NewWorker(db, svc, time.Hour, func(context.Context, int64, int64, string) error {
+		return errors.New("provider timeout Authorization=Basic abc123")
+	})
 	_ = w.Scan(context.Background())
-	var status string
+	var status, lastError string
 	var retry any
-	_ = db.QueryRow(`select status,next_retry_at from rework_rounds where id=?`, result.ReworkRound.ID).Scan(&status, &retry)
+	_ = db.QueryRow(`select status,next_retry_at,last_error from rework_rounds where id=?`, result.ReworkRound.ID).Scan(&status, &retry, &lastError)
 	if status != "planning" || retry == nil {
 		t.Fatalf("status=%s retry=%#v", status, retry)
+	}
+	if strings.Contains(lastError, "abc123") || !strings.Contains(lastError, "[REDACTED]") {
+		t.Fatalf("last_error=%q", lastError)
 	}
 }
 

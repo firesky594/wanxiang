@@ -61,14 +61,17 @@ export const useWorkspaceTabsStore = defineStore('workspaceTabs', {
       this.sidebarCollapsed = value
       this.persist()
     },
-    restore(allowedPaths: Set<string>) {
+    restore(allowedPaths: Set<string> | ((path: string) => boolean)) {
       const raw = window.localStorage.getItem(STORAGE_KEY)
       if (!raw) return
 
       try {
         const saved = JSON.parse(raw) as PersistedWorkspace
+        const isAllowed = typeof allowedPaths === 'function'
+          ? allowedPaths
+          : (path: string) => allowedPaths.has(path)
         const restoredTabs = Array.isArray(saved.tabs)
-          ? saved.tabs.filter(isWorkspaceTab).filter((tab) => allowedPaths.has(tab.path))
+          ? saved.tabs.filter(isWorkspaceTab).filter((tab) => isAllowed(tab.path))
           : []
         const requestedActive = typeof saved.activePath === 'string' ? saved.activePath : ''
 

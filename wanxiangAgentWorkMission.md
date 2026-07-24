@@ -7,16 +7,16 @@
 ```yaml
 requirement_id: R001
 status: 正在开发
-stage: 生产反馈已收到，等待完成鉴权与自适应导航链路诊断
+stage: 修复已部署，等待用户重新登录完成真实鉴权与 SSE 验收
 frontend_build_required: true
 frontend_build_command: npm test -- --run && npm run build
-frontend_build_result: previous_passed_but_acceptance_failed
+frontend_build_result: passed_32_tests_and_production_build
 frontend_dist_path: web/dist
 frontend_deployed: true
-backend_build_required: pending_diagnosis
-backend_build_result: not_run
-backend_restart_required: pending_diagnosis
-backend_restarted: false
+backend_build_required: true
+backend_build_result: passed_go_test_all_and_go_build
+backend_restart_required: true
+backend_restarted: true
 backend_process_manager: pm2
 backend_pm2_app: wanxiang-agent
 backend_pm2_status: online
@@ -49,6 +49,45 @@ backend_healthcheck_result: passed
 - R001 之前的测试和构建虽然通过，但没有覆盖真实管理员登录态下 API 与 SSE 的生产验收，
   因此不能保持“已完成”状态。
 
+### 根因与已部署修复
+
+根因：
+
+1. 生产数据库中的 3 个管理员 session 均已过期，最后一个 session 的过期时间为
+   `2026-07-17T03:52:41.119638758Z`。
+2. 前端路由守卫只判断本地 Token 字符串是否存在，过期 Token 仍可进入后台，随后任务 API
+   和 SSE 一起收到 401。
+3. 后端管理员鉴权优先 Bearer Token；Bearer 无效时不会继续尝试同源 HttpOnly Cookie。
+4. 旧导航使用自定义按钮和 CSS，且旧版本地状态保存了折叠值，生产首次加载只显示图标。
+
+已部署：
+
+- 导航改为 Element Plus `el-container`、`el-aside`、`el-menu` 和 `el-menu-item`。
+- 新版导航默认展开文字，使用顶部明确的菜单按钮折叠或重新展开，保留移动端抽屉。
+- 工作区本地存储升级为 `wanxiang_workspace_v2`，不继承旧版只显示图标的折叠状态。
+- 管理 API 收到 401 时清理过期 Token 和工作区状态，并跳转
+  `/login?redirect=<原页面>`。
+- 后端管理员鉴权在 Bearer 无效时继续校验有效 Cookie；鉴权完全失败时清理 HttpOnly Cookie。
+- SSE 继续使用同源 EventSource 和登录 Cookie，不在 URL 中暴露 Token。
+
+部署验证：
+
+```yaml
+frontend_tests: 32 passed
+frontend_build: passed
+frontend_assets:
+  js: /assets/index-CRwxBtws.js
+  css: /assets/index-O6Zx9rID.css
+backend_tests: go test ./... passed
+backend_build: passed
+backend_pm2_status: online
+backend_pm2_restarts: 1
+backend_healthcheck: '{"ok":true}'
+expired_session_browser_check: redirected_to_login_and_cleared_local_token
+server_backup: /tmp/wanxiang-server-before-r001-rework-20260724T1024
+frontend_backup: /tmp/wanxiang-web-dist-before-r001-rework-20260724T1024.tar.gz
+```
+
 ### 返工范围
 
 1. 追踪登录成功后 Token 的保存、请求头注入、后端 session 校验和 401 处理链路。
@@ -60,8 +99,7 @@ backend_healthcheck_result: passed
 
 ### 下一步
 
-1. 读取后端管理员鉴权中间件、登录 handler、`admin_sessions` 校验和 SSE 路由注册。
-2. 使用不回显 Token 的方式检查浏览器请求是否携带管理员凭据及数据库中是否存在有效 session。
-3. 明确导航插件方案和 SSE 鉴权修复点后，先补失败测试再实施。
-4. 开发和验证期间保持 `wanxiang-agent` 在线；需要替换后端二进制时才按流程重启。
-5. 真实登录态下确认任务列表成功、SSE 在线、导航展开文字正常后，才能再次归档 R001。
+1. 用户刷新页面并使用管理员账号重新登录，生成新的 24 小时 session。
+2. 登录后确认任务列表不再返回 401，Dashboard 显示 `SSE 在线`。
+3. 确认左侧默认显示图标和文字，菜单按钮可以折叠并重新展开。
+4. 以上真实登录验收通过后，才能将 R001 再次归档为“已完成”。

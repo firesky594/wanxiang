@@ -279,7 +279,10 @@ flowchart TD
 - 开发期间禁止执行 `git push -u origin <开发分支>`、`git push --all`、`git push --mirror`
   或任何将非 `main` ref 推送到远端的命令。
 - 项目负责人必须先在本地审查和测试，再把开发分支合入本地 `main`。合并验收通过后，
-  只允许执行 `git push origin main:main`，将本地 `main` 推送到远端 `main`。
+  必须切回 `main`、确认工作区干净，并执行 `git push origin main:main`，
+  将本地 `main` 推送到远端 `main`；远端更新完成前不得将任务标记为已交付。
+- 推送完成后必须确认本地 `main` 与 `origin/main` 指向同一提交；推送失败或远端
+  出现新提交时应停止交付并处理同步问题，禁止使用强制推送覆盖远端。
 - 合并完成后也不得补推开发分支。`git fetch` 只读取远端状态，可以用于同步远端 `main` 基线。
 - Agent 开始工作前应确认工作区干净，并记录起始提交。
 - 每个提交只包含该工作包相关修改。

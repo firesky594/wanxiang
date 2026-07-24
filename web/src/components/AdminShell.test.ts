@@ -88,7 +88,7 @@ describe('admin shell', () => {
 
     expect(store.tabs).toEqual([{ path: '/agents', title: 'Agents' }])
     expect(wrapper.get('[data-tab="/agents"]').text()).toContain('Agents')
-    expect(wrapper.get('[data-page="agents"]').exists()).toBe(true)
+    expect(wrapper.find('[data-page="agents"]').exists()).toBe(true)
   })
 
   it('shows the unlabelled dashboard after the last tab is closed', async () => {
@@ -102,7 +102,7 @@ describe('admin shell', () => {
     expect(store.tabs).toEqual([])
     expect(router.currentRoute.value.path).toBe('/dashboard')
     expect(wrapper.find('[data-testid="workspace-tabs"]').exists()).toBe(false)
-    expect(wrapper.get('[data-page="dashboard"]').exists()).toBe(true)
+    expect(wrapper.find('[data-page="dashboard"]').exists()).toBe(true)
   })
 
   it('opens and closes the navigation drawer on narrow screens', async () => {

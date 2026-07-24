@@ -33,7 +33,7 @@
         type="button"
         class="sidebar-toggle"
         data-testid="sidebar-toggle"
-        :aria-expanded="String(!tabs.sidebarCollapsed)"
+        :aria-expanded="!tabs.sidebarCollapsed"
         :aria-label="tabs.sidebarCollapsed ? '展开导航' : '折叠导航'"
         @click="tabs.setSidebarCollapsed(!tabs.sidebarCollapsed)"
       >
@@ -56,7 +56,7 @@
         <button
           type="button"
           data-testid="mobile-nav-toggle"
-          :aria-expanded="String(mobileNavOpen)"
+          :aria-expanded="mobileNavOpen"
           aria-label="打开导航"
           @click="mobileNavOpen = !mobileNavOpen"
         >

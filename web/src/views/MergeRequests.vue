@@ -1,17 +1,5 @@
 <template>
   <section class="console mr-console">
-    <header class="topbar">
-      <RouterLink class="brand" to="/dashboard">
-        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <span>Wanxiang Agent</span>
-      </RouterLink>
-      <nav class="nav" aria-label="主导航">
-        <RouterLink to="/dashboard"><el-icon><ArrowRight /></el-icon>调度台</RouterLink>
-        <RouterLink to="/issues"><el-icon><Warning /></el-icon>Issue</RouterLink>
-        <RouterLink to="/deliveries"><el-icon><ArrowRight /></el-icon>交付验收</RouterLink>
-      </nav>
-    </header>
-
     <main class="main">
       <div class="page-head">
         <div>
@@ -125,8 +113,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
-import { ArrowRight, Cpu, Refresh, Warning } from '@element-plus/icons-vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { getMergeRequest, listMergeRequests, type MergeRequestDetail } from '../api/client'
 
 const items = ref<MergeRequestDetail[]>([])

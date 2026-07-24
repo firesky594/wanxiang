@@ -1,20 +1,5 @@
 <template>
   <section class="console">
-    <header class="topbar">
-      <RouterLink class="brand" to="/dashboard">
-        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <span>Wanxiang Agent</span>
-      </RouterLink>
-      <nav class="nav">
-        <RouterLink to="/agents"><el-icon><Key /></el-icon>Agent 配置</RouterLink>
-        <RouterLink to="/agents"><el-icon><Connection /></el-icon>Agents</RouterLink>
-        <RouterLink to="/mrs"><el-icon><Share /></el-icon>MR</RouterLink>
-        <RouterLink to="/deliveries"><el-icon><DocumentChecked /></el-icon>交付验收</RouterLink>
-        <RouterLink to="/pipelines">流水线</RouterLink>
-        <RouterLink to="/issues"><el-icon><Warning /></el-icon>Issue</RouterLink>
-      </nav>
-    </header>
-
     <main class="main">
       <div class="page-head">
         <div>
@@ -94,7 +79,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Connection, Cpu, DocumentChecked, Key, Share, Warning } from '@element-plus/icons-vue'
+import { DocumentChecked } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { api, createAdminTask, type Project, type Task } from '../api/client'
 import AgentOutputPanel from '../components/AgentOutputPanel.vue'

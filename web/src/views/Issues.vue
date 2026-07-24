@@ -1,15 +1,5 @@
 <template>
   <section class="console">
-    <header class="topbar">
-      <RouterLink class="brand" to="/dashboard">
-        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <span>Wanxiang Agent</span>
-      </RouterLink>
-      <nav class="nav">
-        <RouterLink to="/dashboard"><el-icon><ArrowRight /></el-icon>调度台</RouterLink>
-        <RouterLink to="/mrs"><el-icon><Share /></el-icon>MR</RouterLink>
-      </nav>
-    </header>
     <main class="main">
       <div class="page-head">
         <div>
@@ -43,8 +33,7 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { RouterLink } from 'vue-router'
-import { ArrowRight, Cpu, Share, Warning } from '@element-plus/icons-vue'
+import { Warning } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { api, type Issue } from '../api/client'
 

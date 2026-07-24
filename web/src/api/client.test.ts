@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { api, cleanupTaskWorkspace, createAdminTask, extendLeaseDeadline, freezeLease, overrideTaskMatch, reassignLease, repairTaskWorkspace, saveAgentConfig, unfreezeLease } from './client'
@@ -5,13 +6,16 @@ import { useAuthStore } from '../stores/auth'
 
 describe('authenticated API client', () => {
   const setItem = vi.fn()
+  const removeItem = vi.fn()
 
   beforeEach(() => {
     vi.restoreAllMocks()
     setItem.mockReset()
+    removeItem.mockReset()
     vi.stubGlobal('localStorage', {
       getItem: vi.fn(() => 'saved-admin-token'),
-      setItem
+      setItem,
+      removeItem
     })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       status: 200,
@@ -26,6 +30,21 @@ describe('authenticated API client', () => {
     const headers = new Headers(init?.headers)
     expect(headers.get('Authorization')).toBe('Bearer saved-admin-token')
     expect(init?.credentials).toBe('same-origin')
+  })
+
+  it('clears stale login state and announces reauthentication on 401', async () => {
+    const unauthorized = vi.fn()
+    window.addEventListener('wanxiang:admin-unauthorized', unauthorized, { once: true })
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      ok: false,
+      error: 'invalid or expired admin session'
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(api('/api/admin/tasks?limit=100&offset=0')).rejects.toThrow('invalid or expired admin session')
+
+    expect(removeItem).toHaveBeenCalledWith('wanxiang_admin_token')
+    expect(removeItem).toHaveBeenCalledWith('wanxiang_workspace_v2')
+    expect(unauthorized).toHaveBeenCalledOnce()
   })
 
   it('bootstraps the first admin and saves its session token', async () => {

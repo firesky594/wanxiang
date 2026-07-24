@@ -27,12 +27,12 @@ describe('workspace tabs store', () => {
     setActivePinia(createPinia())
   })
 
-  it('starts without tabs and with the sidebar collapsed', () => {
+  it('starts without tabs and with the sidebar expanded', () => {
     const store = useWorkspaceTabsStore()
 
     expect(store.tabs).toEqual([])
     expect(store.activePath).toBe('')
-    expect(store.sidebarCollapsed).toBe(true)
+    expect(store.sidebarCollapsed).toBe(false)
   })
 
   it('opens each path once and activates an existing tab', () => {
@@ -59,7 +59,7 @@ describe('workspace tabs store', () => {
   })
 
   it('restores valid routes and ignores unknown persisted paths', () => {
-    window.localStorage.setItem('wanxiang_workspace_v1', JSON.stringify({
+    window.localStorage.setItem('wanxiang_workspace_v2', JSON.stringify({
       tabs: [
         { path: '/agents', title: 'Agents' },
         { path: '/removed', title: '旧页面' }

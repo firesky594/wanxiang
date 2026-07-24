@@ -8,6 +8,7 @@ const sourceFiles = import.meta.glob('./main.ts', {
 
 const appFiles = import.meta.glob([
   './App.vue',
+  './components/AdminShell.vue',
   './views/Dashboard.vue',
   './views/Agents.vue',
   './views/TaskDetail.vue',
@@ -36,6 +37,15 @@ describe('root application', () => {
     expect(app).toContain("import AdminShell from './components/AdminShell.vue'")
     expect(app).toContain('route.meta.public')
     expect(app).toContain('<AdminShell')
+  })
+
+  it('uses Element Plus adaptive menu components for workspace navigation', () => {
+    const shell = appFiles['./components/AdminShell.vue']
+
+    expect(shell).toContain('<el-container')
+    expect(shell).toContain('<el-aside')
+    expect(shell).toContain('<el-menu')
+    expect(shell).toContain('<el-menu-item')
   })
 
   it('keeps navigation out of individual workspace views', () => {

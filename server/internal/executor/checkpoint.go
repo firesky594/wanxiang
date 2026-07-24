@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"wanxiang-agent/server/internal/gitx"
 	"wanxiang-agent/server/internal/leases"
 )
+
+var errNoControlledChanges = errors.New("checkpoint has no controlled changes")
 
 type CheckpointCreator interface {
 	CreateCheckpoint(context.Context, leases.LeaseRef, leases.CheckpointInput) (leases.Checkpoint, error)
@@ -40,9 +43,9 @@ func (r *CheckpointRunner) CreateGitCheckpoint(ctx context.Context, ref leases.L
 	if err := r.db.QueryRowContext(ctx, `select worktree_path,branch_name from project_workspaces where task_id=? and step_id=? and agent_name=? and status='ready'`, ref.TaskID, ref.StepID, ref.AgentName).Scan(&root, &branch); err != nil {
 		return leases.Checkpoint{}, leases.ErrConflict
 	}
-	status, err := gitx.Run(ctx, root, "status", "--porcelain")
-	if err != nil || strings.TrimSpace(status) == "" {
-		return leases.Checkpoint{}, errors.New("checkpoint has no controlled changes")
+	status, err := gitx.Run(ctx, root, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return leases.Checkpoint{}, err
 	}
 	var changed []string
 	for _, line := range strings.Split(strings.TrimRight(status, "\r\n"), "\n") {
@@ -53,6 +56,9 @@ func (r *CheckpointRunner) CreateGitCheckpoint(ctx context.Context, ref leases.L
 		if strings.Contains(path, " -> ") {
 			path = strings.TrimSpace(strings.SplitN(path, " -> ", 2)[1])
 		}
+		if checkpointMirrorPath(path, ref.StepID) {
+			continue
+		}
 		if _, err := validateWorkerPath(path); err != nil {
 			return leases.Checkpoint{}, err
 		}
@@ -60,6 +66,9 @@ func (r *CheckpointRunner) CreateGitCheckpoint(ctx context.Context, ref leases.L
 			return leases.Checkpoint{}, fmt.Errorf("checkpoint path %s: %w", path, leases.ErrConflict)
 		}
 		changed = append(changed, path)
+	}
+	if len(changed) == 0 {
+		return leases.Checkpoint{}, errNoControlledChanges
 	}
 	args := append([]string{"add", "--"}, changed...)
 	if out, err := gitx.Run(ctx, root, args...); err != nil {
@@ -76,4 +85,10 @@ func (r *CheckpointRunner) CreateGitCheckpoint(ctx context.Context, ref leases.L
 	head = strings.TrimSpace(head)
 	input := leases.CheckpointInput{IdempotencyKey: "executor-" + head, GitCommit: head, BranchName: branch, Clean: true, Files: changed, Tests: summary.Tests, Summary: leases.RecoverySummary{Completed: summary.Completed, NextAction: summary.NextAction, FilesChanged: changed, Decisions: summary.Decisions, Blockers: summary.Blockers, Risks: summary.Risks}}
 	return r.creator.CreateCheckpoint(ctx, ref, input)
+}
+
+func checkpointMirrorPath(path string, stepID int64) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	prefix := filepath.ToSlash(filepath.Join(".wanxiang", "checkpoints", fmt.Sprintf("%d", stepID))) + "/"
+	return strings.HasPrefix(path, prefix) && strings.HasSuffix(strings.ToLower(path), ".yaml")
 }

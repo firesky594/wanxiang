@@ -8,7 +8,7 @@
     />
 
     <header class="canvas-title">
-      <span class="canvas-kicker">LIVE ORCHESTRATION / R006</span>
+      <span class="canvas-kicker">LIVE ORCHESTRATION</span>
       <h1>任务调度台</h1>
       <p>
         <strong>{{ connectedAgentCount }}</strong> 个 Agent 已连接
@@ -108,15 +108,6 @@
           <el-icon><DocumentChecked /></el-icon>
           创建项目
         </el-button>
-        <el-alert v-if="createdTask" type="success" :closable="false">
-          <RouterLink
-            :to="`/tasks/${createdTask.id}`"
-            class="mono"
-            @click="drawerOpen = false"
-          >
-            已创建 {{ createdTask.project_slug }}，查看任务详情
-          </RouterLink>
-        </el-alert>
       </div>
 
       <div
@@ -164,8 +155,7 @@ import {
   createAdminTask,
   listAgentConfigs,
   type AgentConfig,
-  type Project,
-  type Task
+  type Project
 } from '../api/client'
 import AgentCanvas from '../components/AgentCanvas.vue'
 import AgentConfigPanel from '../components/AgentConfigPanel.vue'
@@ -183,7 +173,8 @@ const agentError = ref('')
 const taskTitle = ref('')
 const taskDescription = ref('')
 const creatingTask = ref(false)
-const createdTask = ref<Task | null>(null)
+const taskIdempotencyKey = ref(createTaskIdempotencyKey())
+const taskSubmissionFingerprint = ref('')
 const projects = ref<Project[]>([])
 const projectMode = ref<'new' | 'existing'>('new')
 const selectedProjectID = ref<number>()
@@ -205,6 +196,14 @@ const drawerTitle = computed(() => {
 
 const connectedAgentCount = computed(() =>
   agents.value.filter((agent) => ['online', 'busy'].includes(agent.status.trim().toLowerCase())).length)
+
+/** 生成兼容非安全上下文浏览器的单次任务提交幂等键。 */
+function createTaskIdempotencyKey() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  return `task-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
 
 /** 将抽屉宽度同步为 Element Plus 可解析的响应式像素值。 */
 function syncDrawerSize() {
@@ -242,11 +241,10 @@ async function loadDashboardData() {
   events.connect()
 }
 
-/** 打开新建任务抽屉并清除上一次成功结果。 */
+/** 打开新建任务抽屉并保留尚未提交成功的表单。 */
 function openTaskComposer() {
   drawerMode.value = 'create'
   selectedAgentName.value = ''
-  createdTask.value = null
   drawerOpen.value = true
 }
 
@@ -283,8 +281,28 @@ async function resetAgentLayout() {
   ElMessage.success('Agent 布局已重置')
 }
 
-/** 校验任务信息并按项目模式创建后台任务。 */
+/** 重置任务创建表单并生成下一次提交使用的幂等键。 */
+function resetTaskComposer() {
+  taskTitle.value = ''
+  taskDescription.value = ''
+  projectMode.value = 'new'
+  selectedProjectID.value = undefined
+  taskIdempotencyKey.value = createTaskIdempotencyKey()
+  taskSubmissionFingerprint.value = ''
+}
+
+/** 计算任务表单业务载荷指纹，用于区分原样重试和编辑后的新请求。 */
+function currentTaskSubmissionFingerprint() {
+  return JSON.stringify({
+    title: taskTitle.value.trim(),
+    description: taskDescription.value,
+    project_id: projectMode.value === 'existing' ? selectedProjectID.value : null
+  })
+}
+
+/** 防重提交任务，成功时关闭重置，失败时保留用户输入。 */
 async function createTask() {
+  if (creatingTask.value) return
   if (!taskTitle.value.trim()) {
     ElMessage.warning('请输入任务标题')
     return
@@ -293,15 +311,27 @@ async function createTask() {
     ElMessage.warning('请选择要复用的项目')
     return
   }
+  const fingerprint = currentTaskSubmissionFingerprint()
+  if (taskSubmissionFingerprint.value && taskSubmissionFingerprint.value !== fingerprint) {
+    taskIdempotencyKey.value = createTaskIdempotencyKey()
+  }
+  taskSubmissionFingerprint.value = fingerprint
   creatingTask.value = true
   try {
-    createdTask.value = await createAdminTask(
+    await createAdminTask(
       taskTitle.value,
       taskDescription.value,
-      projectMode.value === 'existing' ? selectedProjectID.value : undefined
+      projectMode.value === 'existing' ? selectedProjectID.value : undefined,
+      taskIdempotencyKey.value
     )
-    await tasks.loadList()
+    drawerOpen.value = false
+    resetTaskComposer()
     ElMessage.success('任务项目已创建')
+    void tasks.loadList().catch(() => {
+      ElMessage.warning('任务已创建，但任务列表刷新失败')
+    })
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '任务项目创建失败')
   } finally {
     creatingTask.value = false
   }

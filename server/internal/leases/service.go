@@ -110,6 +110,12 @@ func (s *Service) Heartbeat(ctx context.Context, ref LeaseRef) (Lease, error) {
 	defer tx.Rollback()
 	lease, err := loadLease(ctx, tx, ref.LeaseID)
 	now := s.clock.Now().UTC()
+	if err == nil && sameRef(lease.LeaseRef, ref) && lease.Status == LeaseReview {
+		if err := tx.Commit(); err != nil {
+			return Lease{}, err
+		}
+		return lease, nil
+	}
 	if err != nil || !sameRef(lease.LeaseRef, ref) || lease.Status != LeaseActive || !now.Before(lease.ExpiresAt) {
 		return Lease{}, ErrConflict
 	}

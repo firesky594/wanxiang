@@ -9,7 +9,9 @@ import (
 
 	"wanxiang-agent/server/internal/config"
 	"wanxiang-agent/server/internal/db"
+	"wanxiang-agent/server/internal/events"
 	"wanxiang-agent/server/internal/leases"
+	"wanxiang-agent/server/internal/mr"
 	"wanxiang-agent/server/internal/providers"
 	"wanxiang-agent/server/internal/workspaces"
 )
@@ -30,6 +32,8 @@ func RunWorkerProcess(ctx context.Context, cfg config.Config, input io.Reader, o
 	checks := NewCheckRunner(conn, leaseService)
 	checkpoints := NewCheckpointRunner(conn, leaseService, leaseService)
 	registry := providers.NewRegistry(&http.Client{Timeout: 20 * time.Second})
-	runner := NewRunner(conn, NewEnvChatter(registry, ProcessAgentEnv()), files, checks, checkpoints)
+	runner := NewRunner(conn, NewEnvChatter(registry, ProcessAgentEnv()), files, checks, checkpoints, cfg.AgentDir)
+	runner.freezer = leaseService
+	runner.SetCompletionReporter(NewDatabaseCompletionReporter(conn, mr.NewService(cfg, conn, events.NewBus(conn), nil)))
 	return RunWorker(ctx, input, output, runner, leaseService, checkpoints, leases.HeartbeatInterval)
 }

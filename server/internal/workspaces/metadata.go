@@ -201,7 +201,13 @@ func validateAssignment(value AssignmentMetadata) error {
 		return errors.New("invalid reports_to")
 	}
 	want := fmt.Sprintf("agent/%s/%d-%d-%s", value.AgentName, value.TaskID, value.StepID, value.WorkItemKey)
-	if value.BranchName != want {
+	resumePrefix := fmt.Sprintf("agent/%s/%d-%s-resume-", value.AgentName, value.TaskID, value.WorkItemKey)
+	resumeBranch := strings.HasPrefix(value.BranchName, resumePrefix)
+	if resumeBranch {
+		attempt, err := strconv.ParseInt(strings.TrimPrefix(value.BranchName, resumePrefix), 10, 64)
+		resumeBranch = err == nil && attempt > 0
+	}
+	if value.BranchName != want && !resumeBranch {
 		return errors.New("invalid assignment branch")
 	}
 	if value.WorktreeID == "" || value.BaseCommit == "" || value.Status == "" || len(value.WriteScope) == 0 {

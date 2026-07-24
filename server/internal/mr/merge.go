@@ -51,14 +51,29 @@ func (s *Service) Merge(ctx context.Context, principal Principal, mrID int64, in
 		return MergeResult{}, ErrMergeBlocked
 	}
 	var dependencies int
-	if err := s.db.QueryRowContext(ctx, `select count(*) from workflow_edges e join task_steps dep on dep.id=e.from_step_id where e.task_id=? and e.to_step_id=? and dep.status!='completed' and not exists(select 1 from merge_requests m where m.step_id=dep.id and m.status='merged')`, record.TaskID, record.StepID).Scan(&dependencies); err != nil {
+	if err := s.db.QueryRowContext(ctx, `select count(*)
+		from workflow_edges e
+		join task_steps current on current.task_id=e.task_id and current.id=e.to_step_id
+		join task_steps dep on dep.task_id=e.task_id and dep.id=e.from_step_id
+		where e.task_id=? and e.to_step_id=? and e.plan_version=current.plan_version
+			and (
+				dep.status<>'completed'
+				or not exists(
+					select 1 from merge_requests m
+					where m.task_id=e.task_id and m.step_id=dep.id and m.status='merged'
+				)
+			)`, record.TaskID, record.StepID).Scan(&dependencies); err != nil {
 		return MergeResult{}, err
 	}
 	if dependencies > 0 {
 		return MergeResult{}, ErrMergeBlocked
 	}
 	var leaseOK int
-	if err := s.db.QueryRowContext(ctx, `select count(*) from task_step_leases where lease_id=? and status='active' and expires_at>?`, record.LeaseID, time.Now().UTC().Format(time.RFC3339Nano)).Scan(&leaseOK); err != nil || leaseOK != 1 {
+	if err := s.db.QueryRowContext(ctx, `select count(*)
+		from task_step_leases l
+		join task_steps ts on ts.task_id=l.task_id and ts.id=l.step_id
+		where l.lease_id=? and ts.status='review'
+			and l.status='review'`, record.LeaseID).Scan(&leaseOK); err != nil || leaseOK != 1 {
 		return MergeResult{}, ErrLeaseInvalid
 	}
 	if err := validateSourceBranch(ctx, projectDir, record.SourceBranch); err != nil {
@@ -75,9 +90,9 @@ func (s *Service) Merge(ctx context.Context, principal Principal, mrID int64, in
 		return MergeResult{}, fmt.Errorf("checkout main: %w: %s", err, strings.TrimSpace(out))
 	}
 	if out, err := gitx.Run(ctx, projectDir, "merge", "--no-ff", "--no-edit", record.SourceBranch); err != nil {
-		mergeErr := fmt.Errorf("merge conflict: %w: %s", err, strings.TrimSpace(out))
+		mergeErr := fmt.Errorf("%w: %v: %s", ErrMergeConflict, err, strings.TrimSpace(out))
 		if abortErr := abortMerge(ctx, projectDir); abortErr != nil {
-			return MergeResult{}, fmt.Errorf("%v; abort: %w", mergeErr, abortErr)
+			return MergeResult{}, fmt.Errorf("%w: %v; conflict: %v", ErrMergeAbortFailed, abortErr, mergeErr)
 		}
 		return MergeResult{}, mergeErr
 	}
@@ -143,6 +158,14 @@ func (s *Service) persistMerged(ctx context.Context, record approvedMerge, mrID 
 	}
 	if _, err := tx.ExecContext(ctx, `update task_steps set status='completed',completed_at=? where id=? and task_id=?`, now, record.StepID, record.TaskID); err != nil {
 		return MergeResult{}, err
+	}
+	result, err = tx.ExecContext(ctx, `update task_assignments set status='completed'
+		where task_id=? and step_id=? and status in ('assigned','review')`, record.TaskID, record.StepID)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return MergeResult{}, ErrStateConflict
 	}
 	if _, err := tx.ExecContext(ctx, `update task_step_leases set status='completed',updated_at=? where lease_id=?`, now, record.LeaseID); err != nil {
 		return MergeResult{}, err

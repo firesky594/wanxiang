@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,10 @@ import (
 	"wanxiang-agent/server/internal/leases"
 	"wanxiang-agent/server/internal/matching"
 )
+
+const maxLeaseContinuations = 2
+
+var errContinuationBlocked = errors.New("executor continuation blocked")
 
 type WorkerLaunch struct {
 	Input WorkerInput
@@ -44,6 +49,7 @@ type Supervisor struct {
 	leases                          *leases.Service
 	launcher                        ProcessLauncher
 	options                         SupervisorOptions
+	ownerID                         string
 	scanMu                          sync.Mutex
 	mu                              sync.Mutex
 	active                          map[int64]activeWorker
@@ -55,8 +61,9 @@ type Supervisor struct {
 	startOnce, closeOnce, firstOnce sync.Once
 }
 type activeWorker struct {
-	agent   string
-	process WorkerProcess
+	agent      string
+	claimToken string
+	process    WorkerProcess
 }
 
 // NewSupervisor 创建受并发限制的 Worker 监督器。
@@ -73,7 +80,7 @@ func NewSupervisor(cfg config.Config, db *sql.DB, leaseService *leases.Service, 
 	if launcher == nil {
 		launcher = &OSProcessLauncher{cfg: cfg}
 	}
-	return &Supervisor{cfg: cfg, db: db, leases: leaseService, launcher: launcher, options: options, active: map[int64]activeWorker{}, done: make(chan struct{}), firstDone: make(chan struct{})}
+	return &Supervisor{cfg: cfg, db: db, leases: leaseService, launcher: launcher, options: options, ownerID: newExecutionOwner(), active: map[int64]activeWorker{}, done: make(chan struct{}), firstDone: make(chan struct{})}
 }
 
 // FirstScanDone 返回执行监督器首次扫描完成信号。
@@ -117,30 +124,60 @@ func (s *Supervisor) Scan(ctx context.Context) (int, error) {
 		agentCounts[item.agent]++
 	}
 	s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `select ts.task_id,ts.id,ts.agent_name from task_steps ts join tasks t on t.id=ts.task_id join task_assignments ta on ta.task_id=ts.task_id and ta.step_id=ts.id and ta.agent_name=ts.agent_name join project_workspaces pw on pw.task_id=ts.task_id and pw.step_id=ts.id and pw.agent_name=ts.agent_name where t.status='workspace_ready' and ts.status='assigned' and ts.lease_id='' and ta.status='assigned' and pw.status='ready' and not exists(select 1 from workflow_edges e join task_steps dep on dep.id=e.from_step_id where e.to_step_id=ts.id and dep.status<>'completed') order by t.priority desc,ts.id limit ?`, slots*20)
+	rows, err := s.db.QueryContext(ctx, `select ts.task_id,ts.id,ts.agent_name,ts.lease_id,ts.lease_version,coalesce(l.status,''),coalesce(l.expires_at,'')
+		from task_steps ts
+		join tasks t on t.id=ts.task_id
+		join task_assignments ta on ta.task_id=ts.task_id and ta.step_id=ts.id and ta.agent_name=ts.agent_name
+		join project_workspaces pw on pw.task_id=ts.task_id and pw.step_id=ts.id and pw.agent_name=ts.agent_name
+		left join task_step_leases l on l.lease_id=ts.lease_id and l.lease_version=ts.lease_version and l.agent_name=ts.agent_name
+		where t.status='workspace_ready' and ta.status='assigned' and pw.status='ready'
+			and (
+				(ts.status='assigned' and ts.lease_id='')
+				or (ts.status in ('in_progress','checkpointed') and ts.lease_id<>'' and l.status='active')
+				or (ts.status='interrupted' and ts.lease_id<>'' and l.status='interrupted')
+			)
+			and not exists(
+				select 1 from workflow_edges e
+				join task_steps dep on dep.id=e.from_step_id
+				where e.to_step_id=ts.id and dep.status<>'completed'
+			)
+		order by case when ts.lease_id<>'' then 0 else 1 end,t.priority desc,ts.id
+		limit ?`, slots*20)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
 	type candidate struct {
-		taskID, stepID int64
-		agent          string
+		taskID, stepID, leaseVersion int64
+		agent, leaseID, leaseStatus  string
+		leaseExpires                 string
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var item candidate
-		if err := rows.Scan(&item.taskID, &item.stepID, &item.agent); err != nil {
+		if err := rows.Scan(&item.taskID, &item.stepID, &item.agent, &item.leaseID, &item.leaseVersion, &item.leaseStatus, &item.leaseExpires); err != nil {
+			rows.Close()
 			return 0, err
 		}
 		candidates = append(candidates, item)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return 0, err
 	}
+	rows.Close()
 	started := 0
 	for _, item := range candidates {
+		s.mu.Lock()
+		_, alreadyActive := s.active[item.stepID]
+		s.mu.Unlock()
+		if alreadyActive {
+			continue
+		}
 		definition, err := matching.LoadDefinition(s.cfg.AgentDir, item.agent)
 		if err != nil {
+			if item.leaseID != "" {
+				_ = s.freezeExecution(ctx, item.taskID, item.stepID, item.leaseID, "executor_agent_definition_missing")
+			}
 			continue
 		}
 		if agentCounts[item.agent] >= definition.MaxConcurrency {
@@ -149,32 +186,74 @@ func (s *Supervisor) Scan(ctx context.Context) (int, error) {
 		env, err := loadWorkerEnv(filepath.Join(s.cfg.AgentDir, item.agent, "env"))
 		if err != nil {
 			s.blockMissingConfig(ctx, item.agent)
-			continue
-		}
-		lease, err := s.leases.Acquire(ctx, item.taskID, item.stepID, item.agent)
-		if err != nil {
+			if item.leaseID != "" {
+				_ = s.freezeExecution(ctx, item.taskID, item.stepID, item.leaseID, "executor_agent_config_missing")
+			}
 			continue
 		}
 		token, err := s.issueToken(ctx, item.agent)
 		if err != nil {
 			return started, err
 		}
-		input := WorkerInput{TaskID: item.taskID, StepID: item.stepID, AgentName: item.agent, LeaseID: lease.LeaseID, LeaseVersion: lease.LeaseVersion, ServerURL: workerServerURL(s.cfg.HTTPAddr), AgentToken: token}
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		_, _ = s.db.ExecContext(ctx, `insert into executor_runs(task_id,step_id,agent_name,lease_id,lease_version,status,created_at,updated_at) values(?,?,?,?,?,'starting',?,?) on conflict(lease_id) do nothing`, item.taskID, item.stepID, item.agent, lease.LeaseID, lease.LeaseVersion, now, now)
+		var lease leases.Lease
+		if item.leaseID == "" {
+			lease, err = s.leases.Acquire(ctx, item.taskID, item.stepID, item.agent)
+			if err != nil {
+				continue
+			}
+		} else {
+			expires, parseErr := time.Parse(time.RFC3339Nano, item.leaseExpires)
+			if parseErr != nil {
+				continue
+			}
+			lease = leases.Lease{
+				LeaseRef:  leases.LeaseRef{TaskID: item.taskID, StepID: item.stepID, AgentName: item.agent, LeaseID: item.leaseID, LeaseVersion: item.leaseVersion},
+				Status:    leases.LeaseStatus(item.leaseStatus),
+				ExpiresAt: expires,
+			}
+		}
+		claim, err := s.claimExecution(ctx, lease)
+		if err != nil {
+			if errors.Is(err, errExecutionClaimHeld) {
+				continue
+			}
+			if errors.Is(err, errContinuationBlocked) {
+				_ = s.freezeExecution(ctx, item.taskID, item.stepID, lease.LeaseID, "executor_retry_exhausted")
+				continue
+			}
+			return started, err
+		}
+		lease, err = s.prepareClaimedLease(ctx, lease)
+		if err != nil {
+			_ = s.releaseExecutionClaim(context.Background(), claim, "waiting", err.Error())
+			if errors.Is(err, errContinuationBlocked) {
+				continue
+			}
+			return started, err
+		}
+		claim.Lease = lease
+		input := WorkerInput{TaskID: item.taskID, StepID: item.stepID, AgentName: item.agent, LeaseID: lease.LeaseID, LeaseVersion: lease.LeaseVersion, ClaimToken: claim.Token, ServerURL: workerServerURL(s.cfg.HTTPAddr), AgentToken: token}
 		process, err := s.launcher.Launch(ctx, WorkerLaunch{Input: input, Env: env})
 		if err != nil {
-			_, _ = s.db.ExecContext(ctx, `update executor_runs set status='failed',error_summary=?,updated_at=? where lease_id=?`, Redact(err.Error()), now, lease.LeaseID)
+			_ = s.releaseExecutionClaim(context.Background(), claim, "launch_failed", err.Error())
 			continue
 		}
-		_, _ = s.db.ExecContext(ctx, `update executor_runs set pid=?,status='running',started_at=?,updated_at=? where lease_id=?`, process.PID(), now, now, lease.LeaseID)
+		if _, err = s.confirmExecutionLaunch(ctx, claim, process); err != nil {
+			_ = process.Signal()
+			_ = process.Kill()
+			_ = s.releaseExecutionClaim(context.Background(), claim, "launch_failed", err.Error())
+			if errors.Is(err, errContinuationBlocked) {
+				_ = s.freezeExecution(context.Background(), item.taskID, item.stepID, lease.LeaseID, "executor_retry_exhausted")
+			}
+			continue
+		}
 		s.mu.Lock()
-		s.active[item.stepID] = activeWorker{agent: item.agent, process: process}
+		s.active[item.stepID] = activeWorker{agent: item.agent, claimToken: claim.Token, process: process}
 		s.mu.Unlock()
 		agentCounts[item.agent]++
 		started++
 		s.wg.Add(1)
-		go s.wait(item.stepID, lease.LeaseID, process)
+		go s.wait(item.stepID, claim, process)
 		if started >= slots {
 			break
 		}
@@ -182,7 +261,18 @@ func (s *Supervisor) Scan(ctx context.Context) (int, error) {
 	return started, nil
 }
 
-func (s *Supervisor) wait(stepID int64, leaseID string, process WorkerProcess) {
+func (s *Supervisor) freezeExecution(ctx context.Context, taskID, stepID int64, leaseID, reason string) error {
+	if err := s.leases.FreezeStep(ctx, taskID, stepID, "system", reason); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{"step_id": stepID, "lease_id": leaseID, "reason": reason})
+	_, err := s.db.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at)
+		values(?,'task.executor.blocked','system',?,?)`,
+		taskID, string(payload), time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (s *Supervisor) wait(stepID int64, claim executionClaim, process WorkerProcess) {
 	defer s.wg.Done()
 	err := process.Wait()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -192,7 +282,11 @@ func (s *Supervisor) wait(stepID int64, leaseID string, process WorkerProcess) {
 		exit = 1
 		summary = Redact(err.Error())
 	}
-	_, _ = s.db.Exec(`update executor_runs set exit_code=coalesce(exit_code,?),error_summary=case when error_summary='' then ? else error_summary end,exited_at=coalesce(exited_at,?),updated_at=? where lease_id=?`, exit, summary, now, now, leaseID)
+	_, _ = s.db.Exec(`update executor_runs
+		set exit_code=coalesce(exit_code,?),error_summary=case when error_summary='' then ? else error_summary end,
+			exited_at=coalesce(exited_at,?),updated_at=?,claim_token='',claim_owner='',claim_expires_at=null,pid=null,pid_start_ticks=0
+		where lease_id=? and claim_token=? and claim_owner=?`,
+		exit, summary, now, now, claim.Lease.LeaseID, claim.Token, s.ownerID)
 	s.mu.Lock()
 	delete(s.active, stepID)
 	s.mu.Unlock()

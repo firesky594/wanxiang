@@ -1,2 +1,3 @@
 env
 logs/runtime/*.log
+memory/summaries/runtime-status.md

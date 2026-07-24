@@ -14,7 +14,11 @@ import (
 // InterruptExpired 中断已过期租约并记录恢复窗口。
 func (s *Service) InterruptExpired(ctx context.Context) (int, error) {
 	now := s.clock.Now().UTC()
-	rows, err := s.db.QueryContext(ctx, `select lease_id from task_step_leases where status='active' and expires_at<=? order by id`, formatTime(now))
+	rows, err := s.db.QueryContext(ctx, `select l.lease_id
+		from task_step_leases l
+		join task_steps ts on ts.task_id=l.task_id and ts.id=l.step_id and ts.lease_id=l.lease_id and ts.lease_version=l.lease_version
+		where l.status='active' and l.expires_at<=? and ts.status in ('in_progress','checkpointed')
+		order by l.id`, formatTime(now))
 	if err != nil {
 		return 0, err
 	}
@@ -55,7 +59,7 @@ func (s *Service) InterruptExpired(ctx context.Context) (int, error) {
 			tx.Rollback()
 			return count, err
 		}
-		result, err = tx.ExecContext(ctx, `update task_steps set status='interrupted',interrupted_at=?,resume_deadline=? where task_id=? and id=? and lease_id=? and lease_version=?`, formatTime(now), formatTime(now.Add(ResumeWindow)), taskID, stepID, leaseID, version)
+		result, err = tx.ExecContext(ctx, `update task_steps set status='interrupted',interrupted_at=?,resume_deadline=? where task_id=? and id=? and lease_id=? and lease_version=? and status in ('in_progress','checkpointed')`, formatTime(now), formatTime(now.Add(ResumeWindow)), taskID, stepID, leaseID, version)
 		if err != nil {
 			tx.Rollback()
 			return count, err

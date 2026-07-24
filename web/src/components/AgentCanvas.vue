@@ -169,12 +169,14 @@ function defaultPosition(index: number) {
   if (compact) {
     return {
       x: Math.max(24, (window.innerWidth - 228) / 2),
-      y: 150 + index * 320
+        // 增加紧凑模式下每个卡片的垂直间距
+        y: 150 + index * 380
     }
   }
   const column = index % 4
   const row = Math.floor(index / 4)
-  return { x: 180 + column * 290, y: 190 + row * 290 }
+    // 增加常规布局下行距，让卡片之间垂直间距更大
+    return { x: 180 + column * 290, y: 190 + row * 360 }
 }
 
 /** 按最新 Agent 数据重建节点并保留用户拖动位置。 */

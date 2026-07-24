@@ -12,16 +12,18 @@ type LeaseStatus string
 
 const (
 	LeaseActive      LeaseStatus = "active"
+	LeaseReview      LeaseStatus = "review"
 	LeaseInterrupted LeaseStatus = "interrupted"
 	LeaseFrozen      LeaseStatus = "frozen"
 	LeaseExpired     LeaseStatus = "expired"
 	LeaseRevoked     LeaseStatus = "revoked"
+	LeaseCompleted   LeaseStatus = "completed"
 )
 
 // Valid 校验租约状态是否合法。
 func (s LeaseStatus) Valid() bool {
 	switch s {
-	case LeaseActive, LeaseInterrupted, LeaseFrozen, LeaseExpired, LeaseRevoked:
+	case LeaseActive, LeaseReview, LeaseInterrupted, LeaseFrozen, LeaseExpired, LeaseRevoked, LeaseCompleted:
 		return true
 	default:
 		return false

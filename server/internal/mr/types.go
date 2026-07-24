@@ -13,6 +13,8 @@ var (
 	ErrBranchOwnership    = errors.New("branch_ownership")
 	ErrStateConflict      = errors.New("state_conflict")
 	ErrMergeBlocked       = errors.New("merge_blocked")
+	ErrMergeConflict      = errors.New("merge_conflict")
+	ErrMergeAbortFailed   = errors.New("merge_abort_failed")
 )
 
 type Principal struct {

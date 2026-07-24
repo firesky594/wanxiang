@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// InsertTx 在现有事务内写入事件记录。
 func InsertTx(ctx context.Context, tx *sql.Tx, event Event) (Event, error) {
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()

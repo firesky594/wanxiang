@@ -52,6 +52,7 @@ const username = ref('admin')
 const password = ref('')
 const submitting = ref(false)
 
+/** 校验凭证，执行登录或首次初始化并跳转目标页。 */
 async function submit() {
   if (!username.value.trim() || !password.value) {
     ElMessage.warning('请输入用户名和密码')

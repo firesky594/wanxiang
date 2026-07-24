@@ -22,6 +22,7 @@ const (
 	RepairFromGitSnapshot RepairDirection = "git_snapshot"
 )
 
+// ReconcileTask 核对数据库、快照与 Worktree 漂移。
 func (s *Service) ReconcileTask(ctx context.Context, taskID int64) (TaskWorkspace, error) {
 	workspace, err := s.GetTask(ctx, taskID)
 	if err != nil {
@@ -75,6 +76,7 @@ func (s *Service) ReconcileTask(ctx context.Context, taskID int64) (TaskWorkspac
 	return s.GetTask(ctx, taskID)
 }
 
+// RepairTask 按指定可信源修复工作区漂移。
 func (s *Service) RepairTask(ctx context.Context, taskID int64, direction RepairDirection, actor string) (TaskWorkspace, error) {
 	if direction != RepairFromDatabase && direction != RepairFromGitSnapshot {
 		return TaskWorkspace{}, errors.New("invalid repair direction")
@@ -148,6 +150,7 @@ func (s *Service) RepairTask(ctx context.Context, taskID int64, direction Repair
 	return s.ReconcileTask(ctx, taskID)
 }
 
+// RequestCleanup 校验条件并登记工作区清理请求。
 func (s *Service) RequestCleanup(ctx context.Context, taskID int64, confirmed bool, actor string) (TaskWorkspace, error) {
 	var taskStatus string
 	if err := s.db.QueryRowContext(ctx, `select status from tasks where id=?`, taskID).Scan(&taskStatus); err != nil {
@@ -163,6 +166,8 @@ func (s *Service) RequestCleanup(ctx context.Context, taskID int64, confirmed bo
 	s.audit(ctx, actor, "workspace.cleanup.request", taskID, map[string]any{"confirmed": confirmed, "task_status": taskStatus})
 	return s.GetTask(ctx, taskID)
 }
+
+// ConfirmCleanup 复核现场后移除任务 Worktree。
 func (s *Service) ConfirmCleanup(ctx context.Context, taskID int64, actor string) (TaskWorkspace, error) {
 	workspace, err := s.GetTask(ctx, taskID)
 	if err != nil {

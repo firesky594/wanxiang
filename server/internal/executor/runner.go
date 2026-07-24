@@ -29,10 +29,12 @@ type Runner struct {
 	checkpoints *CheckpointRunner
 }
 
+// NewRunner 创建 Agent 动作编排执行器。
 func NewRunner(db *sql.DB, chat AgentChatter, files *FileTools, checks *CheckRunner, checkpoints *CheckpointRunner) *Runner {
 	return &Runner{db: db, chat: chat, files: files, checks: checks, checkpoints: checkpoints}
 }
 
+// Run 循环调用模型并执行受控工作动作。
 func (r *Runner) Run(ctx context.Context, input WorkerInput) (WorkerResult, error) {
 	result := WorkerResult{Status: RunRunning}
 	ref := leases.LeaseRef{TaskID: input.TaskID, StepID: input.StepID, AgentName: input.AgentName, LeaseID: input.LeaseID, LeaseVersion: input.LeaseVersion}

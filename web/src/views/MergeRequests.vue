@@ -1,17 +1,5 @@
 <template>
   <section class="console mr-console">
-    <header class="topbar">
-      <RouterLink class="brand" to="/dashboard">
-        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <span>Wanxiang Agent</span>
-      </RouterLink>
-      <nav class="nav" aria-label="主导航">
-        <RouterLink to="/dashboard"><el-icon><ArrowRight /></el-icon>调度台</RouterLink>
-        <RouterLink to="/issues"><el-icon><Warning /></el-icon>Issue</RouterLink>
-        <RouterLink to="/deliveries"><el-icon><ArrowRight /></el-icon>交付验收</RouterLink>
-      </nav>
-    </header>
-
     <main class="main">
       <div class="page-head">
         <div>
@@ -125,21 +113,25 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
-import { ArrowRight, Cpu, Refresh, Warning } from '@element-plus/icons-vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { getMergeRequest, listMergeRequests, type MergeRequestDetail } from '../api/client'
 
 const items = ref<MergeRequestDetail[]>([])
 const selected = ref<MergeRequestDetail | null>(null)
 const loading = ref(false)
 const error = ref('')
+/** 统计仍处于审核流程中的合并请求。 */
 const pendingCount = computed(() => items.value.filter((item) => ['pending_review', 'changes_requested', 'approved'].includes(item.merge_request.status)).length)
+/** 统计已经合并的请求数量。 */
 const mergedCount = computed(() => items.value.filter((item) => item.merge_request.status === 'merged').length)
 
 const labels: Record<string, string> = { pending_review: '待审核', changes_requested: '需修改', approved: '已批准', merged: '已合并', closed: '已关闭', passed: '通过' }
+/** 将合并请求状态转换为中文显示名称。 */
 const statusLabel = (status: string) => labels[status] || status
+/** 截取提交哈希前十位用于简洁展示。 */
 const shortCommit = (commit: string) => commit ? commit.slice(0, 10) : '—'
 
+/** 加载合并请求列表及当前请求详情。 */
 async function loadMergeRequests() {
   loading.value = true
   error.value = ''
@@ -154,6 +146,7 @@ async function loadMergeRequests() {
   }
 }
 
+/** 加载指定合并请求的完整详情。 */
 async function selectMR(id: number) {
   try {
     selected.value = await getMergeRequest(id)

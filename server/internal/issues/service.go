@@ -13,6 +13,7 @@ type Service struct {
 	bus *events.Bus
 }
 
+// NewService 创建人工问题服务。
 func NewService(db *sql.DB, buses ...*events.Bus) *Service {
 	bus := events.NewBus(db)
 	if len(buses) > 0 && buses[0] != nil {
@@ -21,6 +22,7 @@ func NewService(db *sql.DB, buses ...*events.Bus) *Service {
 	return &Service{db: db, bus: bus}
 }
 
+// Create 创建问题并发布问题事件。
 func (s *Service) Create(ctx context.Context, input CreateIssueInput) (Issue, error) {
 	blocking := 0
 	status := "open"
@@ -43,6 +45,7 @@ func (s *Service) Create(ctx context.Context, input CreateIssueInput) (Issue, er
 	return issue, nil
 }
 
+// HasBlockingForMR 判断合并请求是否存在未解决阻塞问题。
 func (s *Service) HasBlockingForMR(ctx context.Context, mrID int64) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `select count(*) from issues i
@@ -51,6 +54,7 @@ func (s *Service) HasBlockingForMR(ctx context.Context, mrID int64) (bool, error
 	return count > 0, err
 }
 
+// List 分页查询问题列表。
 func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([]Issue, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20

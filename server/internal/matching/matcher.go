@@ -33,6 +33,7 @@ type MatchResult struct {
 	Rejections []Rejection
 }
 
+// Match 按硬性条件与评分排序匹配 Agent。
 func Match(request MatchRequest, candidates []Candidate) MatchResult {
 	result := MatchResult{Candidates: []CandidateScore{}, Rejections: []Rejection{}}
 	for _, candidate := range candidates {

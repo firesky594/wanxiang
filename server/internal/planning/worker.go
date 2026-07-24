@@ -24,6 +24,7 @@ type Worker struct {
 	wg        sync.WaitGroup
 }
 
+// NewWorker 创建任务规划轮询器。
 func NewWorker(db *sql.DB, planner TaskPlanner, readiness ManagerReadiness, interval time.Duration) *Worker {
 	if interval <= 0 {
 		interval = 2 * time.Second
@@ -31,6 +32,7 @@ func NewWorker(db *sql.DB, planner TaskPlanner, readiness ManagerReadiness, inte
 	return &Worker{db: db, planner: planner, readiness: readiness, interval: interval}
 }
 
+// Start 启动待规划任务轮询。
 func (w *Worker) Start() {
 	w.mu.Lock()
 	if w.cancel != nil {
@@ -57,6 +59,7 @@ func (w *Worker) Start() {
 	}()
 }
 
+// Close 停止规划轮询并等待退出。
 func (w *Worker) Close() {
 	w.mu.Lock()
 	cancel := w.cancel

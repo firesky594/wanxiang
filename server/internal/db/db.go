@@ -6,6 +6,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Open 打开并配置 SQLite 数据库连接。
 func Open(path string) (*sql.DB, error) {
 	conn, err := sql.Open("sqlite", path)
 	if err != nil {

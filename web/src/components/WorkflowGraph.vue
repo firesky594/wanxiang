@@ -10,6 +10,7 @@ import type { RuntimeEvent } from '../stores/events'
 
 const props = defineProps<{ events: RuntimeEvent[] }>()
 
+/** 将运行事件转换为工作流图节点与布局坐标。 */
 const nodes = computed(() =>
   props.events.map((event, index) => ({
     id: String(event.id),
@@ -18,6 +19,7 @@ const nodes = computed(() =>
   }))
 )
 
+/** 按事件先后关系生成工作流图连接边。 */
 const edges = computed(() =>
   props.events.slice(1).map((event, index) => ({
     id: `e-${index}`,

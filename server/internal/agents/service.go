@@ -29,6 +29,7 @@ type Service struct {
 
 var agentNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
+// NewService 创建 Agent 配置与运行服务。
 func NewService(cfg config.Config, db *sql.DB, buses ...*events.Bus) *Service {
 	bus := events.NewBus(db)
 	if len(buses) > 0 && buses[0] != nil {
@@ -37,6 +38,7 @@ func NewService(cfg config.Config, db *sql.DB, buses ...*events.Bus) *Service {
 	return &Service{cfg: cfg, db: db, bus: bus, providerRegistry: providers.NewRegistry(&http.Client{Timeout: 20 * time.Second})}
 }
 
+// EnsureManager 初始化 Manager 目录并同步注册状态。
 func (s *Service) EnsureManager(ctx context.Context) (ManagerStatus, error) {
 	dir := filepath.Join(s.cfg.AgentDir, "manager")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -77,6 +79,7 @@ func (s *Service) EnsureManager(ctx context.Context) (ManagerStatus, error) {
 	return ManagerStatus{Status: status, MissingEnv: missing}, nil
 }
 
+// ManagerReady 确认 Manager 已初始化且在线。
 func (s *Service) ManagerReady(ctx context.Context) (bool, error) {
 	status, err := s.EnsureManager(ctx)
 	if err != nil {
@@ -85,6 +88,7 @@ func (s *Service) ManagerReady(ctx context.Context) (bool, error) {
 	return status.Status == "online", nil
 }
 
+// SaveManagerSecret 安全写入 Manager 环境密钥。
 func (s *Service) SaveManagerSecret(ctx context.Context, key, value string) error {
 	dir := filepath.Join(s.cfg.AgentDir, "manager")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -105,6 +109,7 @@ func (s *Service) SaveManagerSecret(ctx context.Context, key, value string) erro
 	return os.WriteFile(envPath, []byte(content.String()), 0o600)
 }
 
+// SaveAgentConfig 校验并持久化 Agent 运行配置。
 func (s *Service) SaveAgentConfig(ctx context.Context, input AgentConfigInput) (AgentConfigView, error) {
 	if err := ValidateName(input.Name); err != nil {
 		return AgentConfigView{}, err
@@ -167,11 +172,13 @@ func (s *Service) SaveAgentConfig(ctx context.Context, input AgentConfigInput) (
 	return AgentConfigView{Name: input.Name, ProviderType: input.ProviderType, BaseURL: input.BaseURL, Model: input.Model, SecretConfigured: true, Status: "configured"}, nil
 }
 
+// GetAgentConfig 读取指定 Agent 的脱敏运行配置。
 func (s *Service) GetAgentConfig(ctx context.Context, name string) (AgentConfigView, error) {
 	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
 	return runtimeCfg.AgentConfigView, err
 }
 
+// ListAgentConfigs 列出全部 Agent 的脱敏配置与状态。
 func (s *Service) ListAgentConfigs(ctx context.Context) ([]AgentConfigView, error) {
 	entries, err := os.ReadDir(s.cfg.AgentDir)
 	if os.IsNotExist(err) {
@@ -201,6 +208,7 @@ func (s *Service) ListAgentConfigs(ctx context.Context) ([]AgentConfigView, erro
 	return views, nil
 }
 
+// ProbeAgent 调用模型探测 Agent 并更新在线状态。
 func (s *Service) ProbeAgent(ctx context.Context, name string) (AgentConfigView, error) {
 	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
 	if err != nil {
@@ -232,6 +240,7 @@ func (s *Service) ProbeAgent(ctx context.Context, name string) (AgentConfigView,
 	return view, err
 }
 
+// ChatAgent 按 Agent 配置调用模型对话。
 func (s *Service) ChatAgent(ctx context.Context, name string, messages []providers.Message, maxTokens int) (providers.Result, error) {
 	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
 	if err != nil {
@@ -277,6 +286,7 @@ func (s *Service) loadRuntimeConfig(ctx context.Context, name string) (runtimeCo
 	return runtimeConfig{AgentConfigView: AgentConfigView{Name: name, ProviderType: providerType, BaseURL: baseURL, Model: model, SecretConfigured: true, Status: status}, APIKey: apiKey}, nil
 }
 
+// Heartbeat 更新 Agent 心跳并发布心跳事件。
 func (s *Service) Heartbeat(ctx context.Context, input HeartbeatInput) error {
 	if input.Name == "" || input.Role == "" || input.Status == "" {
 		return errors.New("name, role, and status are required")
@@ -306,6 +316,7 @@ func (s *Service) Heartbeat(ctx context.Context, input HeartbeatInput) error {
 	})
 }
 
+// RecordTokenUsage 记录 Agent 模型用量并发布事件。
 func (s *Service) RecordTokenUsage(ctx context.Context, input TokenUsageInput) error {
 	if input.AgentName == "" || input.Model == "" {
 		return errors.New("agent_name and model are required")
@@ -323,6 +334,7 @@ func (s *Service) RecordTokenUsage(ctx context.Context, input TokenUsageInput) e
 	})
 }
 
+// WriteMemory 安全写入 Agent 记忆目录文件。
 func (s *Service) WriteMemory(ctx context.Context, agentName, relPath, content string) error {
 	agentBase, err := s.agentBase(agentName)
 	if err != nil {
@@ -332,6 +344,7 @@ func (s *Service) WriteMemory(ctx context.Context, agentName, relPath, content s
 	return writeAgentFile(base, relPath, content, 0o644)
 }
 
+// WriteLog 安全写入 Agent 日志目录文件。
 func (s *Service) WriteLog(ctx context.Context, agentName, relPath, content string) error {
 	agentBase, err := s.agentBase(agentName)
 	if err != nil {
@@ -341,6 +354,7 @@ func (s *Service) WriteLog(ctx context.Context, agentName, relPath, content stri
 	return writeAgentFile(base, relPath, content, 0o644)
 }
 
+// ValidateName 校验 Agent 名称格式。
 func ValidateName(name string) error {
 	if !agentNamePattern.MatchString(name) {
 		return errors.New("invalid agent name")

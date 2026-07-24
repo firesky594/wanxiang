@@ -38,6 +38,7 @@ type Registry struct {
 	providers map[string]Provider
 }
 
+// NewRegistry 创建并注册受支持模型提供商。
 func NewRegistry(client *http.Client) *Registry {
 	if client == nil {
 		client = http.DefaultClient
@@ -48,6 +49,7 @@ func NewRegistry(client *http.Client) *Registry {
 	}}
 }
 
+// Get 按类型取得模型提供商实现。
 func (r *Registry) Get(providerType string) (Provider, error) {
 	provider, ok := r.providers[strings.ToLower(strings.TrimSpace(providerType))]
 	if !ok {
@@ -56,6 +58,7 @@ func (r *Registry) Get(providerType string) (Provider, error) {
 	return provider, nil
 }
 
+// DefaultBaseURL 返回模型提供商默认接口地址。
 func DefaultBaseURL(providerType string) string {
 	switch strings.ToLower(strings.TrimSpace(providerType)) {
 	case TypeOpenAI:

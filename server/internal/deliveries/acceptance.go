@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Decide 记录交付验收决定并驱动后续状态。
 func (s *Service) Decide(ctx context.Context, snapshotID int64, in DecisionInput) (DecisionResult, error) {
 	if in.Decision != "accepted" && in.Decision != "rejected" && in.Decision != "revision_requested" {
 		return DecisionResult{}, errors.New("invalid_decision")

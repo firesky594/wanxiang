@@ -44,9 +44,12 @@ type AdminService struct {
 	supervisor *Supervisor
 }
 
+// NewAdminService 创建执行器后台管理服务。
 func NewAdminService(db *sql.DB, supervisor *Supervisor) *AdminService {
 	return &AdminService{db: db, supervisor: supervisor}
 }
+
+// ListRuns 查询任务的执行记录列表。
 func (s *AdminService) ListRuns(ctx context.Context, taskID int64) ([]RunView, error) {
 	query := `select id,task_id,step_id,agent_name,pid,status,request_count,input_tokens,output_tokens,exit_code,error_summary,created_at,coalesce(started_at,''),coalesce(exited_at,''),updated_at from executor_runs`
 	args := []any{}
@@ -70,6 +73,8 @@ func (s *AdminService) ListRuns(ctx context.Context, taskID int64) ([]RunView, e
 	}
 	return result, rows.Err()
 }
+
+// GetRun 查询执行记录及动作明细。
 func (s *AdminService) GetRun(ctx context.Context, id int64) (RunDetail, error) {
 	item, err := scanRun(s.db.QueryRowContext(ctx, `select id,task_id,step_id,agent_name,pid,status,request_count,input_tokens,output_tokens,exit_code,error_summary,created_at,coalesce(started_at,''),coalesce(exited_at,''),updated_at from executor_runs where id=?`, id))
 	if err != nil {
@@ -91,12 +96,16 @@ func (s *AdminService) GetRun(ctx context.Context, id int64) (RunDetail, error) 
 	}
 	return RunDetail{Run: item, Actions: actions}, rows.Err()
 }
+
+// Scan 触发一次执行器任务扫描。
 func (s *AdminService) Scan(ctx context.Context) (int, error) {
 	if s.supervisor == nil {
 		return 0, ErrExecutorUnavailable
 	}
 	return s.supervisor.Scan(ctx)
 }
+
+// StopRun 停止指定执行记录对应进程。
 func (s *AdminService) StopRun(ctx context.Context, id int64) error {
 	if s.supervisor == nil {
 		return ErrExecutorUnavailable

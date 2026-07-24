@@ -6,6 +6,7 @@ import (
 	"net/http"
 )
 
+// ServeSSE 将事件订阅转换为 SSE 响应。
 func ServeSSE(bus *Bus) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

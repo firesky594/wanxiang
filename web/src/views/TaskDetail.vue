@@ -1,15 +1,5 @@
 <template>
   <section class="console">
-    <header class="topbar">
-      <RouterLink class="brand" to="/dashboard">
-        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <span>Wanxiang Agent</span>
-      </RouterLink>
-      <nav class="nav">
-        <RouterLink to="/dashboard"><el-icon><ArrowRight /></el-icon>调度台</RouterLink>
-        <RouterLink to="/mrs"><el-icon><Share /></el-icon>MR</RouterLink>
-      </nav>
-    </header>
     <main class="main">
       <div class="page-head">
         <div>
@@ -123,8 +113,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { ArrowRight, Cpu, Share } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AgentOutputPanel from '../components/AgentOutputPanel.vue'
 import WorkflowGraph from '../components/WorkflowGraph.vue'
@@ -135,7 +124,9 @@ import { useTasksStore } from '../stores/tasks'
 const route = useRoute()
 const events = useEventsStore()
 const tasks = useTasksStore()
+/** 从当前路由参数解析任务编号。 */
 const taskID = computed(() => Number(route.params.id))
+/** 筛选当前任务对应的实时事件。 */
 const taskEvents = computed(() => events.events.filter((event) => event.task_id === taskID.value))
 const match = ref<TaskMatch | null>(null)
 const overrideAgents = reactive<Record<number, string>>({})
@@ -144,55 +135,172 @@ const workspace = ref<TaskWorkspace | null>(null)
 const workspaceBusy = ref(false)
 const leaseTimeline = ref<LeaseTimeline | null>(null)
 const recoveryBusy = ref(false)
+/** 按步骤保留最新一条 Agent 匹配决策。 */
 const latestDecisions = computed(() => {
   const byStep = new Map<number, TaskMatch['decisions'][number]>()
   for (const decision of match.value?.decisions || []) byStep.set(decision.step_id, decision)
   return [...byStep.values()]
 })
 
+/** 为指定任务步骤人工改派 Agent。 */
 async function override(stepID: number) {
   const agentName = overrideAgents[stepID]?.trim()
   if (!agentName) return
   overridingStep.value = stepID
-  try { match.value = await overrideTaskMatch(taskID.value, stepID, agentName) }
-  finally { overridingStep.value = null }
+  try {
+    match.value = await overrideTaskMatch(taskID.value, stepID, agentName)
+  } finally {
+    overridingStep.value = null
+  }
 }
+
+/** 截取工作区提交哈希用于简洁展示。 */
 const shortCommit = (value: string) => value ? value.slice(0, 10) : 'pending'
-async function runWorkspace(action: () => Promise<TaskWorkspace>, message: string) { workspaceBusy.value = true; try { workspace.value = await action(); ElMessage.success(message) } finally { workspaceBusy.value = false } }
-function reconcileWorkspace() { return runWorkspace(() => reconcileTaskWorkspace(taskID.value), '工作区校验完成') }
-function repairWorkspace(direction: 'database'|'git_snapshot') { return runWorkspace(() => repairTaskWorkspace(taskID.value, direction), '漂移修复完成') }
-async function requestCleanup() { await ElMessageBox.confirm('非终态任务也要申请清理吗？该操作不会立即删除 worktree。','申请清理',{type:'warning'}); await runWorkspace(() => cleanupTaskWorkspace(taskID.value,'request',true),'已进入待清理状态') }
-async function confirmCleanup() { await ElMessageBox.confirm('确认移除已验证归属的 worktree？分支记录仍会保留。','确认清理',{type:'error'}); await runWorkspace(() => cleanupTaskWorkspace(taskID.value,'confirm'),'worktree 已清理') }
+
+/** 统一执行工作区操作并维护忙碌状态。 */
+async function runWorkspace(action: () => Promise<TaskWorkspace>, message: string) {
+  workspaceBusy.value = true
+  try {
+    workspace.value = await action()
+    ElMessage.success(message)
+  } finally {
+    workspaceBusy.value = false
+  }
+}
+
+/** 校验任务工作区与登记状态是否一致。 */
+function reconcileWorkspace() {
+  return runWorkspace(() => reconcileTaskWorkspace(taskID.value), '工作区校验完成')
+}
+
+/** 按指定基准修复任务工作区漂移。 */
+function repairWorkspace(direction: 'database' | 'git_snapshot') {
+  return runWorkspace(() => repairTaskWorkspace(taskID.value, direction), '漂移修复完成')
+}
+
+/** 确认后申请将任务工作区标记为待清理。 */
+async function requestCleanup() {
+  await ElMessageBox.confirm(
+    '非终态任务也要申请清理吗？该操作不会立即删除 worktree。',
+    '申请清理',
+    { type: 'warning' }
+  )
+  await runWorkspace(
+    () => cleanupTaskWorkspace(taskID.value, 'request', true),
+    '已进入待清理状态'
+  )
+}
+
+/** 确认后清理已验证归属的工作树。 */
+async function confirmCleanup() {
+  await ElMessageBox.confirm(
+    '确认移除已验证归属的 worktree？分支记录仍会保留。',
+    '确认清理',
+    { type: 'error' }
+  )
+  await runWorkspace(
+    () => cleanupTaskWorkspace(taskID.value, 'confirm'),
+    'worktree 已清理'
+  )
+}
+
+/** 查找指定步骤对应的当前租约。 */
 const leaseFor = (stepID: number) => leaseTimeline.value?.leases.find((lease) => lease.step_id === stepID)
+
+/** 查找指定步骤对应的恢复检查点。 */
 const checkpointFor = (stepID: number) => leaseTimeline.value?.checkpoints.find((checkpoint) => checkpoint.step_id === stepID)
+
+/** 将时间值格式化为本地可读文本。 */
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString() : '—'
+
+/** 计算并展示恢复期限剩余秒数。 */
 const remaining = (value?: string) => {
   if (!value) return '—'
   const seconds = Math.ceil((new Date(value).getTime() - Date.now()) / 1000)
   return seconds > 0 ? `${seconds}s` : '已到期'
 }
-async function loadRecovery() { recoveryBusy.value = true; try { leaseTimeline.value = await getLeaseTimeline(taskID.value) } finally { recoveryBusy.value = false } }
-async function extendRecovery(step: StepRecovery) {
-  const lease = leaseFor(step.step_id); if (!lease) return
-  const deadline = new Date(Date.now() + 10 * 60_000).toISOString()
-  await ElMessageBox.confirm(`将步骤 #${step.step_id} 的原 Agent 恢复期延长到 ${formatTime(deadline)}？`, '延长恢复期', { type: 'warning' })
-  await extendLeaseDeadline(taskID.value, step.step_id, lease.lease_id, lease.lease_version, deadline); await loadRecovery(); ElMessage.success('恢复期限已延长')
-}
-async function freezeRecovery(step: StepRecovery) {
-  await ElMessageBox.confirm(`冻结步骤 #${step.step_id} 会立即撤销当前写权限。`, '冻结工作包', { type: 'warning' })
-  await freezeLease(taskID.value, step.step_id, '管理台人工冻结'); await loadRecovery(); ElMessage.success('工作包已冻结')
-}
-async function unfreezeRecovery(step: StepRecovery) {
-  await ElMessageBox.confirm(`解冻步骤 #${step.step_id} 将生成新 lease，旧 lease 不会恢复。`, '解冻工作包', { type: 'warning' })
-  await unfreezeLease(taskID.value, step.step_id); await loadRecovery(); ElMessage.success('已换发新租约')
-}
-async function reassignRecovery(step: StepRecovery) {
-  const prompt = await ElMessageBox.prompt('输入接替 Agent 名称。系统将从干净 checkpoint 创建新分支和独立 worktree，原现场保持不变。', '立即接管', { confirmButtonText: '确认接管', cancelButtonText: '取消', inputPattern: /^[a-z0-9][a-z0-9-]{0,62}$/, inputErrorMessage: 'Agent 名称格式不正确', type: 'error' })
-  const checkpoint = checkpointFor(step.step_id)
-  if (checkpoint?.high_risk) await ElMessageBox.confirm('所选 checkpoint 标记为高风险。确认继续创建接力现场？', '高风险确认', { type: 'error' })
-  await reassignLease(taskID.value, step.step_id, prompt.value.trim(), { checkpoint_id: checkpoint?.id, immediate: true, reason: '管理台立即接管' }); await loadRecovery(); workspace.value = await getTaskWorkspace(taskID.value); ElMessage.success('接力工作区已创建')
+
+/** 加载任务租约与恢复时间线数据。 */
+async function loadRecovery() {
+  recoveryBusy.value = true
+  try {
+    leaseTimeline.value = await getLeaseTimeline(taskID.value)
+  } finally {
+    recoveryBusy.value = false
+  }
 }
 
+/** 确认并延长指定步骤的恢复期限。 */
+async function extendRecovery(step: StepRecovery) {
+  const lease = leaseFor(step.step_id)
+  if (!lease) return
+  const deadline = new Date(Date.now() + 10 * 60_000).toISOString()
+  await ElMessageBox.confirm(
+    `将步骤 #${step.step_id} 的原 Agent 恢复期延长到 ${formatTime(deadline)}？`,
+    '延长恢复期',
+    { type: 'warning' }
+  )
+  await extendLeaseDeadline(taskID.value, step.step_id, lease.lease_id, lease.lease_version, deadline)
+  await loadRecovery()
+  ElMessage.success('恢复期限已延长')
+}
+
+/** 确认并冻结步骤工作包及当前写权限。 */
+async function freezeRecovery(step: StepRecovery) {
+  await ElMessageBox.confirm(
+    `冻结步骤 #${step.step_id} 会立即撤销当前写权限。`,
+    '冻结工作包',
+    { type: 'warning' }
+  )
+  await freezeLease(taskID.value, step.step_id, '管理台人工冻结')
+  await loadRecovery()
+  ElMessage.success('工作包已冻结')
+}
+
+/** 确认解冻工作包并换发新的租约。 */
+async function unfreezeRecovery(step: StepRecovery) {
+  await ElMessageBox.confirm(
+    `解冻步骤 #${step.step_id} 将生成新 lease，旧 lease 不会恢复。`,
+    '解冻工作包',
+    { type: 'warning' }
+  )
+  await unfreezeLease(taskID.value, step.step_id)
+  await loadRecovery()
+  ElMessage.success('已换发新租约')
+}
+
+/** 校验检查点风险并为步骤创建接力工作区。 */
+async function reassignRecovery(step: StepRecovery) {
+  const prompt = await ElMessageBox.prompt(
+    '输入接替 Agent 名称。系统将从干净 checkpoint 创建新分支和独立 worktree，原现场保持不变。',
+    '立即接管',
+    {
+      confirmButtonText: '确认接管',
+      cancelButtonText: '取消',
+      inputPattern: /^[a-z0-9][a-z0-9-]{0,62}$/,
+      inputErrorMessage: 'Agent 名称格式不正确',
+      type: 'error'
+    }
+  )
+  const checkpoint = checkpointFor(step.step_id)
+  if (checkpoint?.high_risk) {
+    await ElMessageBox.confirm(
+      '所选 checkpoint 标记为高风险。确认继续创建接力现场？',
+      '高风险确认',
+      { type: 'error' }
+    )
+  }
+  await reassignLease(taskID.value, step.step_id, prompt.value.trim(), {
+    checkpoint_id: checkpoint?.id,
+    immediate: true,
+    reason: '管理台立即接管'
+  })
+  await loadRecovery()
+  workspace.value = await getTaskWorkspace(taskID.value)
+  ElMessage.success('接力工作区已创建')
+}
+
+/** 初始化任务详情、匹配、工作区、租约和实时事件。 */
 onMounted(async () => {
   await tasks.loadDetail(taskID.value)
   match.value = await getTaskMatch(taskID.value)

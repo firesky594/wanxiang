@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// UnderRoot 解析根目录内安全路径并拒绝链接逃逸。
 func UnderRoot(root, target string) (string, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {

@@ -23,10 +23,12 @@ type Bus struct {
 	subs map[chan Event]struct{}
 }
 
+// NewBus 创建数据库事件总线。
 func NewBus(db *sql.DB) *Bus {
 	return &Bus{db: db, subs: map[chan Event]struct{}{}}
 }
 
+// Publish 持久化事件并广播给订阅者。
 func (b *Bus) Publish(ctx context.Context, event Event) error {
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -44,6 +46,7 @@ func (b *Bus) Publish(ctx context.Context, event Event) error {
 	return nil
 }
 
+// Notify 向内存订阅者广播既有事件。
 func (b *Bus) Notify(event Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -55,6 +58,7 @@ func (b *Bus) Notify(event Event) {
 	}
 }
 
+// PublishJSON 序列化载荷后发布领域事件。
 func (b *Bus) PublishJSON(ctx context.Context, taskID *int64, eventType, actor string, payload any) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -63,6 +67,7 @@ func (b *Bus) PublishJSON(ctx context.Context, taskID *int64, eventType, actor s
 	return b.Publish(ctx, Event{TaskID: taskID, Type: eventType, Actor: actor, Payload: encoded})
 }
 
+// Subscribe 订阅实时事件并返回取消函数。
 func (b *Bus) Subscribe() (<-chan Event, func()) {
 	ch := make(chan Event, 32)
 	b.mu.Lock()
@@ -76,6 +81,7 @@ func (b *Bus) Subscribe() (<-chan Event, func()) {
 	}
 }
 
+// List 分页查询持久化事件。
 func (b *Bus) List(ctx context.Context, taskID *int64, limit, offset int) ([]Event, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20

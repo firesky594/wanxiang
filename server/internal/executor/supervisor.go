@@ -59,6 +59,7 @@ type activeWorker struct {
 	process WorkerProcess
 }
 
+// NewSupervisor 创建受并发限制的 Worker 监督器。
 func NewSupervisor(cfg config.Config, db *sql.DB, leaseService *leases.Service, launcher ProcessLauncher, options SupervisorOptions) *Supervisor {
 	if options.GlobalLimit <= 0 {
 		options.GlobalLimit = 1
@@ -74,7 +75,11 @@ func NewSupervisor(cfg config.Config, db *sql.DB, leaseService *leases.Service, 
 	}
 	return &Supervisor{cfg: cfg, db: db, leases: leaseService, launcher: launcher, options: options, active: map[int64]activeWorker{}, done: make(chan struct{}), firstDone: make(chan struct{})}
 }
+
+// FirstScanDone 返回执行监督器首次扫描完成信号。
 func (s *Supervisor) FirstScanDone() <-chan struct{} { return s.firstDone }
+
+// Start 启动执行任务轮询与进程监督。
 func (s *Supervisor) Start() {
 	s.startOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -97,6 +102,7 @@ func (s *Supervisor) Start() {
 	})
 }
 
+// Scan 扫描可执行租约并启动 Worker 进程。
 func (s *Supervisor) Scan(ctx context.Context) (int, error) {
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()
@@ -191,6 +197,8 @@ func (s *Supervisor) wait(stepID int64, leaseID string, process WorkerProcess) {
 	delete(s.active, stepID)
 	s.mu.Unlock()
 }
+
+// Close 停止监督器及其全部活动进程。
 func (s *Supervisor) Close() {
 	s.closeOnce.Do(func() {
 		s.scanMu.Lock()
@@ -223,6 +231,8 @@ func (s *Supervisor) Close() {
 		}
 	})
 }
+
+// StopRun 向指定活动执行进程发送停止信号。
 func (s *Supervisor) StopRun(ctx context.Context, runID int64) error {
 	var stepID int64
 	if err := s.db.QueryRowContext(ctx, `select step_id from executor_runs where id=?`, runID).Scan(&stepID); err != nil {
@@ -281,6 +291,7 @@ func loadWorkerEnv(path string) (map[string]string, error) {
 
 type OSProcessLauncher struct{ cfg config.Config }
 
+// Launch 按隔离参数启动 Agent Worker 子进程。
 func (l *OSProcessLauncher) Launch(_ context.Context, launch WorkerLaunch) (WorkerProcess, error) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -317,16 +328,24 @@ func (l *OSProcessLauncher) Launch(_ context.Context, launch WorkerLaunch) (Work
 
 type osWorkerProcess struct{ cmd *exec.Cmd }
 
-func (p *osWorkerProcess) PID() int      { return p.cmd.Process.Pid }
-func (p *osWorkerProcess) Wait() error   { return p.cmd.Wait() }
+// PID 返回 Worker 子进程编号。
+func (p *osWorkerProcess) PID() int { return p.cmd.Process.Pid }
+
+// Wait 等待 Worker 子进程退出。
+func (p *osWorkerProcess) Wait() error { return p.cmd.Wait() }
+
+// Signal 向 Worker 子进程发送终止信号。
 func (p *osWorkerProcess) Signal() error { return p.cmd.Process.Signal(syscall.SIGTERM) }
-func (p *osWorkerProcess) Kill() error   { return p.cmd.Process.Kill() }
+
+// Kill 强制结束 Worker 子进程。
+func (p *osWorkerProcess) Kill() error { return p.cmd.Process.Kill() }
 
 type limitedBuffer struct {
 	bytes.Buffer
 	limit int
 }
 
+// Write 写入经脱敏且有容量上限的输出缓冲。
 func (b *limitedBuffer) Write(value []byte) (int, error) {
 	original := len(value)
 	remaining := b.limit - b.Len()

@@ -24,6 +24,7 @@ type approvedMerge struct {
 	ProjectDir   string
 }
 
+// Merge 校验负责人、租约及分支后合并主线。
 func (s *Service) Merge(ctx context.Context, principal Principal, mrID int64, input MergeInput) (MergeResult, error) {
 	if principal.Name != input.AgentName || principal.Role != input.Role {
 		return MergeResult{}, ErrIdentityMismatch
@@ -88,6 +89,7 @@ func (s *Service) Merge(ctx context.Context, principal Principal, mrID int64, in
 	return s.persistMerged(ctx, record, mrID, principal.Name, mergeCommit)
 }
 
+// ReconcileMerge 核对已外部合并提交并同步业务状态。
 func (s *Service) ReconcileMerge(ctx context.Context, mrID int64) (MergeResult, error) {
 	record, err := s.loadApprovedMerge(ctx, mrID)
 	if err != nil || record.Status != MRApproved {

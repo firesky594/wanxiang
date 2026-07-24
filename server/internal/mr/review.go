@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// Review 负责人审批或退回合并请求。
 func (s *Service) Review(ctx context.Context, principal Principal, mrID int64, input ReviewInput) (MRDetail, error) {
 	if err := input.Validate(); err != nil {
 		return MRDetail{}, err

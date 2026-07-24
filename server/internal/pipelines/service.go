@@ -12,7 +12,10 @@ import (
 
 type Service struct{ db *sql.DB }
 
+// NewService 创建流水线服务。
 func NewService(db *sql.DB) *Service { return &Service{db: db} }
+
+// Start 幂等创建流水线运行及步骤。
 func (s *Service) Start(ctx context.Context, in StartInput) (Run, error) {
 	if Validate(in.Definition) != nil || in.ProjectID < 1 || in.IdempotencyKey == "" || in.RequestedBy == "" {
 		return Run{}, ErrInvalidDefinition
@@ -56,6 +59,8 @@ func (s *Service) Start(ctx context.Context, in StartInput) (Run, error) {
 	}
 	return s.Get(ctx, id)
 }
+
+// Confirm 人工确认待执行的高风险步骤。
 func (s *Service) Confirm(ctx context.Context, runID int64, stepKey, actor string) (Step, error) {
 	if actor == "" {
 		return Step{}, ErrConfirmationRequired
@@ -74,6 +79,8 @@ func (s *Service) Confirm(ctx context.Context, runID int64, stepKey, actor strin
 	}
 	return s.getStep(ctx, runID, stepKey)
 }
+
+// ConfirmRollback 人工确认待执行的流水线回滚。
 func (s *Service) ConfirmRollback(ctx context.Context, runID int64, actor string) error {
 	if actor == "" {
 		return ErrConfirmationRequired
@@ -92,6 +99,8 @@ func (s *Service) ConfirmRollback(ctx context.Context, runID int64, actor string
 	}
 	return nil
 }
+
+// Get 查询流水线运行及全部步骤。
 func (s *Service) Get(ctx context.Context, id int64) (Run, error) {
 	var r Run
 	var task sql.NullInt64
@@ -124,6 +133,8 @@ func (s *Service) Get(ctx context.Context, id int64) (Run, error) {
 	}
 	return r, rows.Err()
 }
+
+// List 查询最近的流水线运行列表。
 func (s *Service) List(ctx context.Context) ([]Run, error) {
 	rows, e := s.db.QueryContext(ctx, `select id from pipeline_runs order by id desc limit 100`)
 	if e != nil {

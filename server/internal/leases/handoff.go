@@ -27,6 +27,7 @@ type ReassignInput struct {
 	Reason       string `json:"reason"`
 }
 
+// Reassign 基于检查点将中断步骤接管给新 Agent。
 func (s *Service) Reassign(ctx context.Context, input ReassignInput, actor string) (Lease, error) {
 	if actor == "" || input.TaskID <= 0 || input.StepID <= 0 || !safeAgentPart.MatchString(input.NewAgent) {
 		return Lease{}, ErrConflict

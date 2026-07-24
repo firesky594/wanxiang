@@ -20,12 +20,15 @@ type Worker struct {
 	wg       sync.WaitGroup
 }
 
+// NewWorker 创建工作区装配与校准轮询器。
 func NewWorker(db *sql.DB, service WorkspaceOrchestrator, interval time.Duration) *Worker {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
 	return &Worker{db: db, service: service, interval: interval}
 }
+
+// Start 启动工作区装配与校准轮询。
 func (w *Worker) Start() {
 	w.mu.Lock()
 	if w.cancel != nil {
@@ -51,6 +54,8 @@ func (w *Worker) Start() {
 		}
 	}()
 }
+
+// Close 停止工作区轮询并等待退出。
 func (w *Worker) Close() {
 	w.mu.Lock()
 	cancel := w.cancel

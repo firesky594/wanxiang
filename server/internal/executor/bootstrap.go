@@ -14,6 +14,7 @@ import (
 	"wanxiang-agent/server/internal/workspaces"
 )
 
+// RunWorkerProcess 装配并运行独立 Agent Worker 进程。
 func RunWorkerProcess(ctx context.Context, cfg config.Config, input io.Reader, output io.Writer) error {
 	conn, err := db.Open(filepath.Join(cfg.DataDir, "app.db"))
 	if err != nil {

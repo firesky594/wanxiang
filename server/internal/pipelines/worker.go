@@ -30,6 +30,7 @@ type Worker struct {
 	pm2Path    func(context.Context, string, string) (string, error)
 }
 
+// NewWorker 创建流水线执行轮询器。
 func NewWorker(db *sql.DB, r Runner, interval time.Duration, projectDir func(int64) (string, error)) *Worker {
 	if interval <= 0 {
 		interval = 2 * time.Second
@@ -38,6 +39,8 @@ func NewWorker(db *sql.DB, r Runner, interval time.Duration, projectDir func(int
 	w.pm2Path = queryPM2Path
 	return w
 }
+
+// Start 启动流水线步骤与回滚轮询。
 func (w *Worker) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
@@ -55,6 +58,8 @@ func (w *Worker) Start() {
 		}
 	}()
 }
+
+// Close 停止流水线轮询并等待退出。
 func (w *Worker) Close() {
 	w.once.Do(func() {
 		if w.cancel != nil {
@@ -64,6 +69,8 @@ func (w *Worker) Close() {
 		<-w.done
 	})
 }
+
+// Scan 恢复中断步骤并执行可运行流水线任务。
 func (w *Worker) Scan(ctx context.Context) error {
 	rowsStale, _ := w.db.QueryContext(ctx, `select id,run_id,kind,timeout_seconds,started_at,attempt,max_attempts from pipeline_steps where status='running'`)
 	type staleStep struct {

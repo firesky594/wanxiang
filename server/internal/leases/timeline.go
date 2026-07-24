@@ -51,6 +51,7 @@ type Reassignment struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// GetCheckpointDetail 查询检查点摘要、文件与测试明细。
 func (s *Service) GetCheckpointDetail(ctx context.Context, checkpointID int64) (TimelineCheckpoint, error) {
 	var item TimelineCheckpoint
 	var clean, highRisk int
@@ -69,6 +70,7 @@ func (s *Service) GetCheckpointDetail(ctx context.Context, checkpointID int64) (
 	return item, nil
 }
 
+// CurrentForAgent 查询 Agent 当前步骤租约。
 func (s *Service) CurrentForAgent(ctx context.Context, taskID, stepID int64, agent string) (Lease, error) {
 	var leaseID string
 	if err := s.db.QueryRowContext(ctx, `select lease_id from task_steps where task_id=? and id=? and agent_name=?`, taskID, stepID, agent).Scan(&leaseID); err != nil || leaseID == "" {
@@ -81,6 +83,7 @@ func (s *Service) CurrentForAgent(ctx context.Context, taskID, stepID int64, age
 	return lease, nil
 }
 
+// Timeline 汇总任务租约、检查点与接管时间线。
 func (s *Service) Timeline(ctx context.Context, taskID int64) (Timeline, error) {
 	result := Timeline{TaskID: taskID, Steps: []StepRecovery{}, Leases: []Lease{}, Checkpoints: []TimelineCheckpoint{}, Reassignments: []Reassignment{}}
 	rows, err := s.db.QueryContext(ctx, `select id,agent_name,status,lease_version,checkpoint_id,attempt,last_heartbeat_at,lease_expires_at,resume_deadline from task_steps where task_id=? order by id`, taskID)

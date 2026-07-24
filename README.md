@@ -8,7 +8,7 @@ Backend:
 
 ```bash
 cd server
-go test ./...
+./test/run.sh ./...
 go run ./cmd/wanxiang
 ```
 
@@ -26,8 +26,8 @@ Build the backend and frontend from the project root:
 
 ```bash
 cd server
-go test ./...
-go build -o wanxiang ./cmd/wanxiang
+./test/run.sh ./...
+go build -o /tmp/wanxiang-agent-verify ./cmd/wanxiang
 
 cd ../web
 npm ci

@@ -31,6 +31,7 @@ type ProviderResponse struct {
 	NextAction string          `json:"next_action"`
 }
 
+// ParseProviderResponse 严格解析并校验模型动作响应。
 func ParseProviderResponse(raw string) (ProviderResponse, error) {
 	if len(raw) == 0 || len(raw) > maxProtocolBytes || !utf8.ValidString(raw) {
 		return ProviderResponse{}, errors.New("invalid provider response size")

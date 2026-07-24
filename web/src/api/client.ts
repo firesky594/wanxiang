@@ -1,3 +1,4 @@
+/** 发送统一鉴权请求，并处理管理员登录失效状态。 */
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (!headers.has('Content-Type')) {
@@ -13,7 +14,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers
   })
   if (!res.ok) {
-    throw new Error(await res.text())
+    const message = await res.text()
+    if (res.status === 401 && path !== '/api/admin/login' && path !== '/api/admin/bootstrap') {
+      localStorage.removeItem('wanxiang_admin_token')
+      localStorage.removeItem('wanxiang_workspace_v2')
+      window.dispatchEvent(new CustomEvent('wanxiang:admin-unauthorized'))
+    }
+    throw new Error(message)
   }
   return res.json() as Promise<T>
 }
@@ -42,11 +49,13 @@ export interface AgentConfigInput {
   api_key: string
 }
 
+/** 获取全部 Agent 模型配置。 */
 export async function listAgentConfigs(): Promise<AgentConfig[]> {
   const res = await api<{ ok: boolean; agents: AgentConfig[] }>('/api/admin/agents')
   return res.agents
 }
 
+/** 保存指定 Agent 的模型配置。 */
 export async function saveAgentConfig(name: string, input: AgentConfigInput): Promise<AgentConfig> {
   const res = await api<{ ok: boolean; agent: AgentConfig }>(`/api/admin/agents/${encodeURIComponent(name)}/config`, {
     method: 'PUT',
@@ -55,6 +64,7 @@ export async function saveAgentConfig(name: string, input: AgentConfigInput): Pr
   return res.agent
 }
 
+/** 探测指定 Agent 的模型接口可用性。 */
 export async function probeAgent(name: string): Promise<AgentConfig> {
   const res = await api<{ ok: boolean; agent: AgentConfig }>(`/api/admin/agents/${encodeURIComponent(name)}/probe`, {
     method: 'POST'
@@ -109,6 +119,7 @@ export interface TaskDetail {
   edges: WorkflowEdge[]
 }
 
+/** 创建后台任务，可选择复用已有项目。 */
 export async function createAdminTask(title: string, description: string, projectID?: number): Promise<Task> {
   const body: { title: string; description: string; project_id?: number } = { title, description }
   if (projectID !== undefined) body.project_id = projectID
@@ -140,16 +151,34 @@ export interface TaskWorkspace {
   items: WorkspaceItem[]
 }
 
+/** 执行任务工作区的统一管理操作。 */
 async function workspaceAction(taskID: number, action: string, body?: unknown): Promise<TaskWorkspace> {
   const response = await api<{ ok: boolean; workspace: TaskWorkspace }>(`/api/admin/tasks/${taskID}/workspace/${action}`, {
     method: 'POST', body: body === undefined ? undefined : JSON.stringify(body)
   })
   return response.workspace
 }
-export async function getTaskWorkspace(taskID: number): Promise<TaskWorkspace> { const response = await api<{ok:boolean;workspace:TaskWorkspace}>(`/api/admin/tasks/${taskID}/workspace`); return response.workspace }
-export function reconcileTaskWorkspace(taskID: number) { return workspaceAction(taskID, 'reconcile') }
-export function repairTaskWorkspace(taskID: number, direction: 'database'|'git_snapshot') { return workspaceAction(taskID, 'repair', { direction }) }
-export function cleanupTaskWorkspace(taskID: number, action: 'request'|'confirm', confirmed = false) { return workspaceAction(taskID, 'cleanup', { action, confirmed }) }
+
+/** 获取指定任务的工作区快照。 */
+export async function getTaskWorkspace(taskID: number): Promise<TaskWorkspace> {
+  const response = await api<{ ok: boolean; workspace: TaskWorkspace }>(`/api/admin/tasks/${taskID}/workspace`)
+  return response.workspace
+}
+
+/** 校验并协调任务工作区与记录状态。 */
+export function reconcileTaskWorkspace(taskID: number) {
+  return workspaceAction(taskID, 'reconcile')
+}
+
+/** 按指定数据源修复任务工作区漂移。 */
+export function repairTaskWorkspace(taskID: number, direction: 'database' | 'git_snapshot') {
+  return workspaceAction(taskID, 'repair', { direction })
+}
+
+/** 申请或确认清理任务工作区。 */
+export function cleanupTaskWorkspace(taskID: number, action: 'request' | 'confirm', confirmed = false) {
+  return workspaceAction(taskID, 'cleanup', { action, confirmed })
+}
 
 export interface StepRecovery {
   step_id: number
@@ -197,22 +226,35 @@ export interface LeaseTimeline {
   reassignments: Array<{ id: number; step_id: number; from_agent: string; to_agent: string; checkpoint_id?: number; attempt: number; reason: string; status: string; created_at: string }>
 }
 
+/** 获取任务租约、检查点与接管记录时间线。 */
 export async function getLeaseTimeline(taskID: number): Promise<LeaseTimeline> {
   const response = await api<{ ok: boolean; timeline: LeaseTimeline }>(`/api/admin/tasks/${taskID}/leases`)
   return response.timeline
 }
 
+/** 执行步骤租约的统一管理操作。 */
 function leaseAdminAction(taskID: number, stepID: number, action: string, body?: unknown) {
   return api<{ ok: boolean; lease?: TaskLease }>(`/api/admin/tasks/${taskID}/steps/${stepID}/lease/${action}`, {
     method: 'POST', body: body === undefined ? undefined : JSON.stringify(body)
   })
 }
 
+/** 延长指定步骤租约的恢复期限。 */
 export function extendLeaseDeadline(taskID: number, stepID: number, leaseID: string, leaseVersion: number, resumeDeadline: string) {
   return leaseAdminAction(taskID, stepID, 'extend', { lease_id: leaseID, lease_version: leaseVersion, resume_deadline: resumeDeadline })
 }
-export function freezeLease(taskID: number, stepID: number, reason: string) { return leaseAdminAction(taskID, stepID, 'freeze', { reason }) }
-export function unfreezeLease(taskID: number, stepID: number) { return leaseAdminAction(taskID, stepID, 'unfreeze') }
+
+/** 冻结指定步骤租约并撤销写权限。 */
+export function freezeLease(taskID: number, stepID: number, reason: string) {
+  return leaseAdminAction(taskID, stepID, 'freeze', { reason })
+}
+
+/** 解冻指定步骤并换发新租约。 */
+export function unfreezeLease(taskID: number, stepID: number) {
+  return leaseAdminAction(taskID, stepID, 'unfreeze')
+}
+
+/** 将指定步骤立即或按检查点交给新 Agent。 */
 export function reassignLease(taskID: number, stepID: number, newAgent: string, options: { checkpoint_id?: number; immediate?: boolean; reason?: string } = {}) {
   return leaseAdminAction(taskID, stepID, 'reassign', { new_agent: newAgent, ...options })
 }
@@ -241,11 +283,13 @@ export interface TaskMatch {
   lead_reason?: string
 }
 
+/** 获取任务步骤的 Agent 匹配结果。 */
 export async function getTaskMatch(taskID: number): Promise<TaskMatch> {
   const response = await api<{ ok: boolean; match: TaskMatch }>(`/api/admin/tasks/${taskID}/match`)
   return response.match
 }
 
+/** 人工改写指定步骤的 Agent 匹配结果。 */
 export async function overrideTaskMatch(taskID: number, stepID: number, agentName: string): Promise<TaskMatch> {
   const response = await api<{ ok: boolean; match: TaskMatch }>(`/api/admin/tasks/${taskID}/match`, {
     method: 'PUT',
@@ -307,11 +351,13 @@ export interface MergeRequestDetail {
   reviews: MRReview[]
 }
 
+/** 获取合并请求列表及其交付报告。 */
 export async function listMergeRequests(): Promise<MergeRequestDetail[]> {
   const response = await api<{ ok: boolean; merge_requests: MergeRequestDetail[] }>('/api/admin/mrs?limit=100')
   return response.merge_requests
 }
 
+/** 获取单个合并请求的完整详情。 */
 export async function getMergeRequest(id: number): Promise<MergeRequestDetail> {
   const response = await api<{ ok: boolean; detail: MergeRequestDetail }>(`/api/admin/mrs/${id}`)
   return response.detail
@@ -333,13 +379,49 @@ export interface DeliverySnapshot { id:number;task_id:number;project_id:number;v
 export interface AcceptanceDecision { id:number;snapshot_id:number;task_id:number;decision:string;comment:string;created_by:string;created_at:string }
 export interface ReworkRound { id:number;task_id:number;source_snapshot_id:number;decision_id:number;round:number;plan_version:number;reason:string;status:string;last_error?:string;created_by:string;created_at:string }
 export interface DeliveryDetail { snapshot:DeliverySnapshot;decisions:AcceptanceDecision[];rework_rounds:ReworkRound[] }
-export async function listDeliveries():Promise<DeliverySnapshot[]>{const response=await api<{ok:boolean;deliveries:DeliverySnapshot[]}>('/api/admin/deliveries');return response.deliveries}
-export async function getDelivery(id:number):Promise<DeliveryDetail>{const response=await api<{ok:boolean;detail:DeliveryDetail}>(`/api/admin/deliveries/${id}`);return response.detail}
-export async function decideDelivery(id:number,input:{decision:'accepted'|'rejected'|'revision_requested';comment:string;idempotency_key:string}){const response=await api<{ok:boolean;result:{decision:AcceptanceDecision;rework_round?:ReworkRound;task_status:string}}>(`/api/admin/deliveries/${id}/decisions`,{method:'POST',body:JSON.stringify(input)});return response.result}
+
+/** 获取全部任务交付快照。 */
+export async function listDeliveries(): Promise<DeliverySnapshot[]> {
+  const response = await api<{ ok: boolean; deliveries: DeliverySnapshot[] }>('/api/admin/deliveries')
+  return response.deliveries
+}
+
+/** 获取指定交付快照及其决策详情。 */
+export async function getDelivery(id: number): Promise<DeliveryDetail> {
+  const response = await api<{ ok: boolean; detail: DeliveryDetail }>(`/api/admin/deliveries/${id}`)
+  return response.detail
+}
+
+/** 提交交付验收、拒绝或返工决定。 */
+export async function decideDelivery(id: number, input: { decision: 'accepted' | 'rejected' | 'revision_requested'; comment: string; idempotency_key: string }) {
+  const response = await api<{ ok: boolean; result: { decision: AcceptanceDecision; rework_round?: ReworkRound; task_status: string } }>(`/api/admin/deliveries/${id}/decisions`, {
+    method: 'POST',
+    body: JSON.stringify(input)
+  })
+  return response.result
+}
+
 export interface PipelineStep {ID:number;RunID:number;Key:string;Kind:string;Command:string;Status:string;FailureClass:string;OutputSummary:string;ConfirmedBy:string;Args:string[];TimeoutSeconds:number;MaxAttempts:number;Attempt:number;Reversible:boolean}
 export interface PipelineRun {ID:number;ProjectID:number;TaskID?:number;Status:string;SafeCommit:string;ArtifactHash:string;DefinitionHash:string;RequestedBy:string;CreatedAt:string;LastError:string;RollbackStatus:string;Steps:PipelineStep[]}
-export const listPipelines=()=>api<PipelineRun[]>('/api/admin/pipelines')
-export const getPipeline=(id:number)=>api<PipelineRun>(`/api/admin/pipelines/${id}`)
-export const startPipeline=(project:number,task_id?:number)=>api<PipelineRun>(`/api/admin/projects/${project}/pipelines`,{method:'POST',body:JSON.stringify({task_id,idempotency_key:crypto.randomUUID()})})
-export const confirmPipeline=(run:number,step:string)=>api<PipelineStep>(`/api/admin/pipelines/${run}/steps/${step}/confirm`,{method:'POST'})
-export const confirmPipelineRollback=(run:number)=>api<{ok:boolean}>(`/api/admin/pipelines/${run}/rollback/confirm`,{method:'POST'})
+
+/** 获取全部流水线运行记录。 */
+export const listPipelines = () => api<PipelineRun[]>('/api/admin/pipelines')
+
+/** 获取指定流水线运行详情。 */
+export const getPipeline = (id: number) => api<PipelineRun>(`/api/admin/pipelines/${id}`)
+
+/** 为项目启动一条新的流水线。 */
+export const startPipeline = (project: number, taskID?: number) => api<PipelineRun>(`/api/admin/projects/${project}/pipelines`, {
+  method: 'POST',
+  body: JSON.stringify({ task_id: taskID, idempotency_key: crypto.randomUUID() })
+})
+
+/** 确认执行流水线中的高风险步骤。 */
+export const confirmPipeline = (run: number, step: string) => api<PipelineStep>(`/api/admin/pipelines/${run}/steps/${step}/confirm`, {
+  method: 'POST'
+})
+
+/** 确认回滚指定流水线运行。 */
+export const confirmPipelineRollback = (run: number) => api<{ ok: boolean }>(`/api/admin/pipelines/${run}/rollback/confirm`, {
+  method: 'POST'
+})

@@ -11,6 +11,7 @@ import (
 	"strings"
 )
 
+// InterruptExpired 中断已过期租约并记录恢复窗口。
 func (s *Service) InterruptExpired(ctx context.Context) (int, error) {
 	now := s.clock.Now().UTC()
 	rows, err := s.db.QueryContext(ctx, `select lease_id from task_step_leases where status='active' and expires_at<=? order by id`, formatTime(now))
@@ -78,6 +79,7 @@ func (s *Service) InterruptExpired(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// Resume 校验工作区现场并恢复中断租约。
 func (s *Service) Resume(ctx context.Context, ref LeaseRef) (Lease, error) {
 	lease, err := loadLease(ctx, s.db, ref.LeaseID)
 	now := s.clock.Now().UTC()

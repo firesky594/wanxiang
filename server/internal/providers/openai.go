@@ -12,8 +12,10 @@ import (
 
 type OpenAI struct{ client *http.Client }
 
+// NewOpenAI 创建 OpenAI 模型客户端。
 func NewOpenAI(client *http.Client) *OpenAI { return &OpenAI{client: client} }
 
+// Chat 调用 OpenAI 对话接口并解析用量。
 func (p *OpenAI) Chat(ctx context.Context, cfg Config, messages []Message, maxTokens int) (Result, error) {
 	if err := validateConfig(cfg); err != nil {
 		return Result{}, err

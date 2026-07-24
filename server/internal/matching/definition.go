@@ -26,6 +26,7 @@ type AgentDefinition struct {
 
 var definitionNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
+// LoadDefinition 加载 Agent 定义、资源与记忆摘要。
 func LoadDefinition(agentRoot, name string) (AgentDefinition, error) {
 	if !definitionNamePattern.MatchString(name) {
 		return AgentDefinition{}, errors.New("invalid agent name")

@@ -28,6 +28,7 @@ type ShutdownCheckpointer interface {
 	CreateGitCheckpoint(context.Context, leases.LeaseRef, WorkerSummary) (leases.Checkpoint, error)
 }
 
+// RunWorker 运行带租约心跳和中断检查点的工作循环。
 func RunWorker(parent context.Context, input io.Reader, output io.Writer, runner WorkerRunner, heartbeater LeaseHeartbeater, checkpoint ShutdownCheckpointer, heartbeatInterval time.Duration) error {
 	decoder := json.NewDecoder(io.LimitReader(input, 64*1024))
 	decoder.DisallowUnknownFields()
@@ -87,6 +88,7 @@ func RunWorker(parent context.Context, input io.Reader, output io.Writer, runner
 	}
 }
 
+// NewWorkerCommand 创建仅传递白名单环境的 Worker 命令。
 func NewWorkerCommand(binary string, input *os.File, agentEnv map[string]string) *exec.Cmd {
 	cmd := exec.Command(binary, "agent-worker", "--input-fd", "3")
 	cmd.ExtraFiles = []*os.File{input}
@@ -110,9 +112,12 @@ type EnvChatter struct {
 	values   map[string]string
 }
 
+// NewEnvChatter 创建基于进程环境配置的模型客户端。
 func NewEnvChatter(registry *providers.Registry, values map[string]string) *EnvChatter {
 	return &EnvChatter{registry: registry, values: values}
 }
+
+// ChatAgent 使用进程环境配置调用模型对话。
 func (e *EnvChatter) ChatAgent(ctx context.Context, _ string, messages []providers.Message, maxTokens int) (providers.Result, error) {
 	providerType := strings.TrimSpace(e.values["AGENT_PROVIDER_TYPE"])
 	key := strings.TrimSpace(e.values["AGENT_API_KEY"])
@@ -127,6 +132,8 @@ func (e *EnvChatter) ChatAgent(ctx context.Context, _ string, messages []provide
 	base := strings.TrimRight(strings.TrimSpace(e.values["AGENT_BASE_URL"]), "/")
 	return provider.Chat(ctx, providers.Config{APIKey: key, BaseURL: base, Model: model}, messages, maxTokens)
 }
+
+// ProcessAgentEnv 读取 Worker 允许使用的 Agent 环境变量。
 func ProcessAgentEnv() map[string]string {
 	result := map[string]string{}
 	for _, key := range []string{"AGENT_PROVIDER_TYPE", "AGENT_API_KEY", "AGENT_BASE_URL", "AGENT_MODEL"} {

@@ -26,10 +26,12 @@ type CheckpointRunner struct {
 	creator    CheckpointCreator
 }
 
+// NewCheckpointRunner 创建 Git 检查点执行器。
 func NewCheckpointRunner(db *sql.DB, authorizer LeaseAuthorizer, creator CheckpointCreator) *CheckpointRunner {
 	return &CheckpointRunner{db: db, authorizer: authorizer, creator: creator}
 }
 
+// CreateGitCheckpoint 校验租约与工作区后创建 Git 检查点。
 func (r *CheckpointRunner) CreateGitCheckpoint(ctx context.Context, ref leases.LeaseRef, summary WorkerSummary) (leases.Checkpoint, error) {
 	if len(summary.Completed) == 0 || strings.TrimSpace(summary.NextAction) == "" {
 		return leases.Checkpoint{}, errors.New("checkpoint summary is incomplete")

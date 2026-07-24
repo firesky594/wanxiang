@@ -21,6 +21,7 @@ type Runner interface {
 }
 type CommandRunner struct{}
 
+// Run 在受限环境中执行白名单流水线命令。
 func (CommandRunner) Run(ctx context.Context, dir string, s Step) Result {
 	if !allowedStep(StepDefinition{ID: s.Key, Kind: s.Kind, Command: s.Command, Args: s.Args, TimeoutSeconds: s.TimeoutSeconds, MaxAttempts: s.MaxAttempts, Reversible: s.Reversible}) {
 		return Result{FailureClass: "permission_blocked", Err: ErrInvalidDefinition}

@@ -12,6 +12,7 @@ import (
 
 var workKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
+// ParsePlan 严格解析并校验结构化任务计划。
 func ParsePlan(data []byte) (Plan, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

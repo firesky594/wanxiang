@@ -11,6 +11,7 @@ import (
 
 var safeID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
+// LoadDefinition 读取并校验项目流水线定义。
 func LoadDefinition(projectDir string) (Definition, error) {
 	meta := filepath.Join(projectDir, ".wanxiang")
 	if info, err := os.Lstat(meta); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
@@ -31,6 +32,8 @@ func LoadDefinition(projectDir string) (Definition, error) {
 	}
 	return d, nil
 }
+
+// Validate 校验流水线步骤、参数与发布约束。
 func Validate(d Definition) error {
 	seen := map[string]bool{}
 	buildArtifact := ""

@@ -92,3 +92,47 @@ func TestRunnerMapsConfigAndInvalidJSONErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentContextRedactsMultilineSecrets(t *testing.T) {
+	input := `safe-before
+api_key: |
+  first-secret-line
+  second-secret-line
+safe-middle
+token:
+  yaml-token-value
+"token":
+  quoted-token-value
+"token": [
+"json-token-value"
+]
+TOKEN=first-part\
+second-part
+-----BEGIN PRIVATE KEY-----
+private-key-body
+-----END PRIVATE KEY-----
+safe-after`
+	got := redactAgentContext(input)
+	for _, secret := range []string{"first-secret-line", "second-secret-line", "yaml-token-value", "quoted-token-value", "json-token-value", "first-part", "second-part", "private-key-body"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("multiline secret leaked: %q in %q", secret, got)
+		}
+	}
+	for _, safe := range []string{"safe-before", "safe-middle", "safe-after"} {
+		if !strings.Contains(got, safe) {
+			t.Fatalf("safe context lost: %q in %q", safe, got)
+		}
+	}
+}
+
+func TestProviderToolResultIsRedactedBeforeModelReuse(t *testing.T) {
+	got := redactProviderToolResult("safe\nAuthorization: Bearer raw-token\napi_key: |\n  multiline-value\n\"auth\":\"registry-secret\"\nhttps://user:password@example.test/path")
+	for _, secret := range []string{"raw-token", "multiline-value", "registry-secret", "user", "password"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("tool result leaked %q in %q", secret, got)
+		}
+	}
+	if !strings.Contains(got, "safe") {
+		t.Fatalf("safe tool output lost: %q", got)
+	}
+}

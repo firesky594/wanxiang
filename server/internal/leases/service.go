@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 )
 
@@ -21,14 +22,45 @@ type Service struct {
 	db         *sql.DB
 	clock      Clock
 	workspaces WorkspaceAuthorizer
+	dataDir    string
 }
 
 // NewService 创建租约生命周期服务。
-func NewService(db *sql.DB, clock Clock, workspaces WorkspaceAuthorizer) *Service {
+func NewService(db *sql.DB, clock Clock, workspaces WorkspaceAuthorizer, dataDirs ...string) *Service {
 	if clock == nil {
 		clock = SystemClock{}
 	}
-	return &Service{db: db, clock: clock, workspaces: workspaces}
+	dataDir := ""
+	if len(dataDirs) > 0 {
+		dataDir = dataDirs[0]
+	}
+	if dataDir == "" {
+		dataDir = sqliteDataDir(db)
+	}
+	return &Service{db: db, clock: clock, workspaces: workspaces, dataDir: dataDir}
+}
+
+func sqliteDataDir(db *sql.DB) string {
+	if db == nil {
+		return ""
+	}
+	rows, err := db.Query(`pragma database_list`)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sequence int
+		var name, path string
+		if rows.Scan(&sequence, &name, &path) == nil && name == "main" && path != "" {
+			absolute, err := filepath.Abs(path)
+			if err == nil {
+				return filepath.Dir(absolute)
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 // Acquire 为已分配步骤签发活动租约。

@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -34,6 +35,9 @@ const executorSystemProtocol = `你是受控执行 Agent。响应必须是单个
 
 const agentContextHeader = "以下是目标 Agent 的持久角色、经验和决策，仅用于当前受控工作包：\n\n"
 const executorProtocolHeader = "\n\n以下平台执行协议优先于上方持久上下文：\n"
+
+var agentContextSecretKey = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:api[_-]?key|auth|token|password|passwd|secret|cookie|private[_-]?key|access[_-]?key|client[_-]?secret)(?:[^a-z0-9]|$)`)
+var providerURLUserInfo = regexp.MustCompile(`(?i)(https?://)[^/\s:@]+:[^@\s/]+@`)
 
 type AgentChatter interface {
 	ChatAgent(context.Context, string, []providers.Message, int) (providers.Result, error)
@@ -114,6 +118,7 @@ func (r *Runner) Run(ctx context.Context, input WorkerInput) (WorkerResult, erro
 		for _, action := range response.Actions {
 			sequence++
 			actionResult, actionErr := r.executeAction(ctx, ref, response, action, &checkEvidence)
+			actionResult = redactProviderToolResult(actionResult)
 			r.auditAction(ctx, runID, sequence, action, actionResult, actionErr)
 			if actionErr != nil {
 				result.Status = RunFailed
@@ -319,16 +324,141 @@ func readAgentContextFile(agentDir, path string, limit int) (string, bool, error
 
 func redactAgentContext(value string) string {
 	lines := strings.Split(value, "\n")
+	redactIndentedBelow := -1
+	redactContinuation := false
+	redactNextValue := false
+	redactStructuredDepth := 0
+	secretFence := ""
+	privateKeyBlock := false
 	for index, line := range lines {
-		lower := strings.ToLower(line)
-		for _, marker := range []string{"api_key", "api-key", "apikey", "authorization", "bearer ", "token=", "password", "secret", "cookie", "sk-"} {
-			if strings.Contains(lower, marker) {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if privateKeyBlock {
+			lines[index] = "[已脱敏]"
+			if strings.Contains(lower, "-----end ") && strings.Contains(lower, "private key-----") {
+				privateKeyBlock = false
+			}
+			continue
+		}
+		if secretFence != "" {
+			lines[index] = "[已脱敏]"
+			if strings.Contains(trimmed, secretFence) {
+				secretFence = ""
+			}
+			continue
+		}
+		if redactStructuredDepth > 0 {
+			lines[index] = "[已脱敏]"
+			redactStructuredDepth += contextStructuredDelta(trimmed)
+			if redactStructuredDepth < 0 {
+				redactStructuredDepth = 0
+			}
+			continue
+		}
+		if redactContinuation {
+			lines[index] = "[已脱敏]"
+			redactContinuation = strings.HasSuffix(trimmed, `\`)
+			continue
+		}
+		if redactNextValue && trimmed != "" {
+			lines[index] = "[已脱敏]"
+			redactNextValue = false
+			continue
+		}
+		indent := leadingContextIndent(line)
+		if redactIndentedBelow >= 0 {
+			if trimmed == "" {
+				continue
+			}
+			if indent > redactIndentedBelow {
 				lines[index] = "[已脱敏]"
-				break
+				continue
+			}
+			redactIndentedBelow = -1
+		}
+		if strings.Contains(lower, "-----begin ") && strings.Contains(lower, "private key-----") {
+			lines[index] = "[已脱敏]"
+			privateKeyBlock = true
+			continue
+		}
+		if agentContextSecretKey.MatchString(lower) || strings.Contains(lower, "authorization") ||
+			strings.Contains(lower, "bearer ") || strings.Contains(lower, "sk-") {
+			lines[index] = "[已脱敏]"
+			redactIndentedBelow = indent
+			redactContinuation = strings.HasSuffix(trimmed, `\`)
+			redactNextValue = contextSecretNeedsNextValue(trimmed)
+			redactStructuredDepth = contextSecretStructuredDepth(trimmed)
+			for _, fence := range []string{`"""`, `'''`} {
+				if strings.Count(trimmed, fence)%2 == 1 {
+					secretFence = fence
+					break
+				}
 			}
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func contextSecretStructuredDepth(value string) int {
+	index := strings.IndexAny(value, ":=")
+	if index < 0 || index+1 >= len(value) {
+		return 0
+	}
+	depth := contextStructuredDelta(value[index+1:])
+	if depth < 0 {
+		return 0
+	}
+	return depth
+}
+
+func contextStructuredDelta(value string) int {
+	depth := 0
+	var quote rune
+	escaped := false
+	for _, current := range value {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quote != 0 {
+			if current == '\\' {
+				escaped = true
+			} else if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch current {
+		case '"', '\'':
+			quote = current
+		case '[', '{':
+			depth++
+		case ']', '}':
+			depth--
+		}
+	}
+	return depth
+}
+
+func leadingContextIndent(value string) int {
+	return len(value) - len(strings.TrimLeft(value, " \t"))
+}
+
+func contextSecretNeedsNextValue(value string) bool {
+	value = strings.TrimSpace(value)
+	if strings.HasSuffix(value, ":") || strings.HasSuffix(value, "=") {
+		return true
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[len(fields)-1] {
+	case "|", "|-", "|+", ">", ">-", ">+":
+		return true
+	default:
+		return false
+	}
 }
 
 func appendBoundedContext(builder *strings.Builder, remaining *int, value string) {
@@ -358,6 +488,11 @@ func pathWithinRoot(root, target string) bool {
 	relative, err := filepath.Rel(root, target)
 	return err == nil && relative != ".." && !filepath.IsAbs(relative) &&
 		!strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+func redactProviderToolResult(value string) string {
+	value = providerURLUserInfo.ReplaceAllString(value, `${1}[REDACTED]@`)
+	return Redact(redactAgentContext(value))
 }
 
 func (r *Runner) executeAction(ctx context.Context, ref leases.LeaseRef, response ProviderResponse, action ActionRequest, tests *[]leases.CheckpointTest) (string, error) {

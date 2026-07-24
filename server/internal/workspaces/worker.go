@@ -12,12 +12,13 @@ type WorkspaceOrchestrator interface {
 	ReconcileTask(context.Context, int64) (TaskWorkspace, error)
 }
 type Worker struct {
-	db       *sql.DB
-	service  WorkspaceOrchestrator
-	interval time.Duration
-	mu       sync.Mutex
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	db          *sql.DB
+	service     WorkspaceOrchestrator
+	interval    time.Duration
+	lifecycleMu sync.Mutex
+	mu          sync.Mutex
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 }
 
 // NewWorker 创建工作区装配与校准轮询器。
@@ -30,6 +31,8 @@ func NewWorker(db *sql.DB, service WorkspaceOrchestrator, interval time.Duration
 
 // Start 启动工作区装配与校准轮询。
 func (w *Worker) Start() {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
 	w.mu.Lock()
 	if w.cancel != nil {
 		w.mu.Unlock()
@@ -57,6 +60,8 @@ func (w *Worker) Start() {
 
 // Close 停止工作区轮询并等待退出。
 func (w *Worker) Close() {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
 	w.mu.Lock()
 	cancel := w.cancel
 	w.cancel = nil

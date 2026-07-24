@@ -119,3 +119,7 @@ Vue Flow、浏览器 API 及框架生命周期回调不在此列。
 114. `web/src/views/Dashboard.vue` `resetTaskComposer`：重置任务表单并生成下一次幂等键。
 115. `web/src/views/Dashboard.vue` `createTaskIdempotencyKey`：兼容生成单次任务提交幂等键。
 116. `web/src/views/Dashboard.vue` `currentTaskSubmissionFingerprint`：区分原样重试与编辑后新请求。
+117. `web/src/views/Dashboard.vue` `readPendingTaskSubmission`：读取刷新前待确认提交的幂等状态。
+118. `web/src/views/Dashboard.vue` `persistPendingTaskSubmission`：保存待确认提交的幂等键与载荷指纹。
+119. `web/src/views/Dashboard.vue` `clearPendingTaskSubmission`：清除已经确认成功的提交标识。
+120. `web/src/views/Dashboard.vue` `fallbackTaskSubmissionFingerprint`：无 Web Crypto 时生成无原文摘要。

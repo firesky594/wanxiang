@@ -22,6 +22,43 @@ import (
 
 const maxCheckOutputBytes = maxRedactedBytes
 
+const (
+	checkWorkspaceQuotaBytes = 128 * 1024 * 1024
+	checkTemporaryQuotaBytes = 512 * 1024 * 1024
+)
+
+var checkSandboxInit = fmt.Sprintf(`set -eu
+/usr/bin/mount -o remount,size=%d,nr_inodes=32768,nosuid,nodev /workspace
+/usr/bin/mount -o remount,size=%d,nr_inodes=65536,nosuid,nodev /tmp
+/usr/bin/tar -C /workspace-source --one-file-system --ignore-case \
+  --exclude=.git --exclude='*/.git' \
+  --exclude=.env --exclude='.env.*' --exclude='*/.env' --exclude='*/.env.*' \
+  --exclude=env --exclude='*/env' --exclude='*.env' \
+  --exclude=.docker --exclude='*/.docker' \
+  --exclude=.ssh --exclude='*/.ssh' --exclude=.aws --exclude='*/.aws' \
+  --exclude=.gnupg --exclude='*/.gnupg' --exclude=.kube --exclude='*/.kube' \
+  --exclude=.git-credentials --exclude='*/.git-credentials' \
+  --exclude=.npmrc --exclude='*/.npmrc' --exclude=.pypirc --exclude='*/.pypirc' \
+  --exclude=.netrc --exclude='*/.netrc' \
+  --exclude=credentials.json --exclude='*/credentials.json' \
+  --exclude='credential.*' --exclude='*/credential.*' \
+  --exclude='credentials.*' --exclude='*/credentials.*' \
+  --exclude=credential --exclude='*/credential' --exclude=credentials --exclude='*/credentials' \
+  --exclude='secret.*' --exclude='*/secret.*' --exclude='secrets.*' --exclude='*/secrets.*' \
+  --exclude=secret --exclude='*/secret' --exclude=secrets --exclude='*/secrets' \
+  --exclude=.secrets --exclude='*/.secrets' \
+  --exclude=service-account.json --exclude='*/service-account.json' \
+  --exclude=id_rsa --exclude='*/id_rsa' --exclude=id_ed25519 --exclude='*/id_ed25519' \
+  --exclude='*.pem' --exclude='*.key' --exclude='*.p12' --exclude='*.pfx' \
+  --exclude='*.jks' --exclude='*.keystore' \
+  -cf - . | /usr/bin/tar -C /workspace --no-same-owner --no-same-permissions -xf -
+/usr/bin/umount /workspace-source
+/usr/bin/mount -o remount,ro,nosuid,nodev,noexec /
+/usr/bin/mount -o remount,ro,nosuid,noexec /dev
+/usr/bin/mount -o remount,ro,nosuid,nodev,noexec /proc
+exec /usr/bin/setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --nnp -- "$@"`,
+	checkWorkspaceQuotaBytes, checkTemporaryQuotaBytes)
+
 type CheckRequest struct {
 	Command string
 	Args    []string
@@ -75,12 +112,11 @@ func (r *CheckRunner) RunCheck(ctx context.Context, ref leases.LeaseRef, request
 		result.Error = "check workspace state is unavailable"
 		return result
 	}
-	checkRoot, cleanup, err := copyCheckWorkspace(ctx, root)
+	checkRoot, err := validateCheckWorkspaceRoot(root)
 	if err != nil {
 		result.Error = "check sandbox is unavailable"
 		return result
 	}
-	defer cleanup()
 	timeout := request.Timeout
 	if timeout <= 0 {
 		timeout = 60 * time.Second
@@ -285,6 +321,9 @@ func safePackageScript(script string) bool {
 			expectCommand = true
 			continue
 		}
+		if strings.Contains(part, "&") {
+			return false
+		}
 		if expectCommand {
 			if !allowed[part] {
 				return false
@@ -306,41 +345,30 @@ func safePackageScript(script string) bool {
 	return !expectCommand
 }
 
-func copyCheckWorkspace(ctx context.Context, root string) (string, func(), error) {
-	parent, err := os.MkdirTemp("", "wanxiang-check-")
-	if err != nil {
-		return "", nil, err
+func validateCheckWorkspaceRoot(root string) (string, error) {
+	if !filepath.IsAbs(root) {
+		return "", errors.New("check workspace path is not absolute")
 	}
-	cleanup := func() { _ = os.RemoveAll(parent) }
-	target := filepath.Join(parent, "work")
-	if err := os.Mkdir(target, 0o700); err != nil {
-		cleanup()
-		return "", nil, err
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(root))
+	if err != nil || resolved == string(filepath.Separator) {
+		return "", errors.New("check workspace path is unsafe")
 	}
-	cmd := exec.CommandContext(ctx, "cp", "-a", "--reflink=auto", filepath.Clean(root)+string(filepath.Separator)+".", target)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("copy check workspace: %w: %s", err, Redact(string(output)))
+	info, err := os.Lstat(resolved)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("check workspace path is unsafe")
 	}
-	for _, dir := range []string{".check-home", ".check-tmp", ".check-cache"} {
-		if err := os.MkdirAll(filepath.Join(target, dir), 0o700); err != nil {
-			cleanup()
-			return "", nil, err
-		}
-	}
-	return target, cleanup, nil
+	return resolved, nil
 }
 
 func sandboxedCheckCommand(ctx context.Context, root, binary string, commandArgs []string) (*exec.Cmd, error) {
 	const bwrap = "/usr/bin/bwrap"
-	info, err := os.Lstat(bwrap)
-	if err != nil {
-		return nil, errors.New("check sandbox is unavailable")
-	}
-	stat, ownedByRoot := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 ||
-		info.Mode().Perm()&0o022 != 0 || !ownedByRoot || stat.Uid != 0 {
-		return nil, errors.New("check sandbox is unavailable")
+	const prlimit = "/usr/bin/prlimit"
+	for _, program := range []string{
+		bwrap, prlimit, "/usr/bin/mount", "/usr/bin/setpriv", "/usr/bin/tar", "/usr/bin/umount",
+	} {
+		if !trustedRootExecutable(program) {
+			return nil, errors.New("check sandbox is unavailable")
+		}
 	}
 	toolchain, err := resolveCheckToolchain(binary)
 	if err != nil {
@@ -351,7 +379,9 @@ func sandboxedCheckCommand(ctx context.Context, root, binary string, commandArgs
 		"--unshare-all",
 		"--new-session",
 		"--clearenv",
-		"--bind", root, "/workspace",
+		"--cap-add", "CAP_SYS_ADMIN",
+		"--ro-bind", root, "/workspace-source",
+		"--tmpfs", "/workspace",
 		"--dir", "/usr",
 		"--ro-bind", "/usr/bin", "/usr/bin",
 		"--ro-bind", "/usr/lib", "/usr/lib",
@@ -407,10 +437,33 @@ func sandboxedCheckCommand(ctx context.Context, root, binary string, commandArgs
 			"--setenv", "GOSUMDB", "off",
 		)
 	}
-	args = append(args, "--", toolchain.binary)
+	args = append(args,
+		"--", prlimit,
+		"--nproc=128:128",
+		"--nofile=512:512",
+		"--as=4294967296:4294967296",
+		"--fsize=134217728:134217728",
+		"--cpu=120:120",
+		"--core=0:0",
+		"--",
+		"/bin/sh",
+		"-c",
+		checkSandboxInit,
+		"wanxiang-check",
+		toolchain.binary,
+	)
 	args = append(args, toolchain.prefixArgs...)
 	args = append(args, commandArgs...)
 	return exec.CommandContext(ctx, bwrap, args...), nil
+}
+
+func trustedRootExecutable(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 || info.Mode().Perm()&0o022 != 0 {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Uid == 0
 }
 
 type checkToolchain struct {

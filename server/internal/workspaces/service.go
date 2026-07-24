@@ -72,15 +72,25 @@ func (s *Service) ProvisionTask(ctx context.Context, taskID int64) (workspace Ta
 	if err != nil {
 		return TaskWorkspace{}, err
 	}
-	projectDir, err = files.UnderRoot(s.cfg.ProjectDir, projectDir)
-	if err != nil {
-		return TaskWorkspace{}, fmt.Errorf("unsafe project path: %w", err)
-	}
+	lockedProjectID := projectID
 	lock := s.projectLock(projectID)
 	lock.Lock()
 	defer lock.Unlock()
-	if err = s.db.QueryRowContext(ctx, `select status from tasks where id=?`, taskID).Scan(&taskStatus); err != nil {
+	releaseProjectLock, lockErr := gitx.AcquireProjectLock(ctx, s.cfg.DataDir, lockedProjectID)
+	if lockErr != nil {
+		return TaskWorkspace{}, fmt.Errorf("acquire project git lock: %w", lockErr)
+	}
+	defer releaseProjectLock()
+	if err = s.db.QueryRowContext(ctx, `select p.id,p.slug,p.dir,t.status from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).
+		Scan(&projectID, &slug, &projectDir, &taskStatus); err != nil {
 		return TaskWorkspace{}, err
+	}
+	if projectID != lockedProjectID {
+		return TaskWorkspace{}, errors.New("task project changed while waiting for project lock")
+	}
+	projectDir, err = files.UnderRoot(s.cfg.ProjectDir, projectDir)
+	if err != nil {
+		return TaskWorkspace{}, fmt.Errorf("unsafe project path: %w", err)
 	}
 	if taskStatus != "assigned" && taskStatus != "workspace_ready" {
 		return TaskWorkspace{}, fmt.Errorf("task %d is not assigned", taskID)

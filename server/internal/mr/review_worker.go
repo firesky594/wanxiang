@@ -40,8 +40,9 @@ const (
 )
 
 var (
-	reviewSecretPattern     = regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|token|password|passwd|secret|private[_-]?key)\s*[:=]\s*[^\s,;}]+`)
-	reviewSecretLinePattern = regexp.MustCompile(`(?im)^([^\r\n]{0,160}\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|token|password|passwd|secret|private[_-]?key)\b\s*[:=]).*$`)
+	reviewSecretPattern     = regexp.MustCompile(`(?i)\b((?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|credential|token|password|passwd|secret(?:[_-]?key)?|private[_-]?key))\b["'\x60]?\s*[:=]\s*[^\s,;}]+`)
+	reviewSecretLinePattern = regexp.MustCompile(`(?im)^([^\r\n]{0,160}\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|credential|token|password|passwd|secret(?:[_-]?key)?|private[_-]?key)\b["'\x60]?\s*[:=]).*$`)
+	reviewSecretKeyPattern  = regexp.MustCompile(`(?i)\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|credential|token|password|passwd|secret(?:[_-]?key)?|private[_-]?key)\b["'\x60]?\s*[:=]`)
 	reviewSKPattern         = regexp.MustCompile(`\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b`)
 	reviewJWTPattern        = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b`)
 	reviewBearerPattern     = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b`)
@@ -929,6 +930,7 @@ func boundedReviewTests(values []TestEvidence) []TestEvidence {
 
 func redactReviewText(value string) string {
 	value = reviewPrivateKeyPattern.ReplaceAllString(value, "[REDACTED PRIVATE KEY]")
+	value = redactReviewNestedSecrets(value)
 	value = reviewSecretLinePattern.ReplaceAllString(value, "$1 [REDACTED]")
 	value = reviewSecretPattern.ReplaceAllString(value, "$1=[REDACTED]")
 	value = reviewSKPattern.ReplaceAllString(value, "[REDACTED]")
@@ -936,6 +938,149 @@ func redactReviewText(value string) string {
 	value = reviewBearerPattern.ReplaceAllString(value, "Bearer [REDACTED]")
 	value = reviewCloudKeyPattern.ReplaceAllString(value, "[REDACTED]")
 	return reviewLongSecretPattern.ReplaceAllString(value, "[REDACTED]")
+}
+
+func redactReviewNestedSecrets(value string) string {
+	lines := strings.Split(value, "\n")
+	state := reviewMultilineSecretState{}
+	for index, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			state = reviewMultilineSecretState{}
+			continue
+		}
+		marker, content := reviewDiffContent(line)
+		trimmed := strings.TrimSpace(content)
+		indent := len(content) - len(strings.TrimLeft(content, " \t"))
+		switch state.mode {
+		case reviewSecretIndentBlock:
+			if trimmed == "" {
+				continue
+			}
+			if indent > state.indent || (indent == state.indent && strings.HasPrefix(trimmed, "-")) {
+				lines[index] = redactReviewMultilineLine(marker, indent)
+				continue
+			}
+			state = reviewMultilineSecretState{}
+		case reviewSecretBracketBlock:
+			if trimmed != "" {
+				lines[index] = redactReviewMultilineLine(marker, indent)
+			}
+			state.depth += reviewBracketDelta(content)
+			if state.depth <= 0 {
+				state = reviewMultilineSecretState{}
+			}
+			continue
+		case reviewSecretTripleQuoted:
+			if trimmed != "" {
+				lines[index] = redactReviewMultilineLine(marker, indent)
+			}
+			if strings.Count(content, state.delimiter)%2 == 1 {
+				state = reviewMultilineSecretState{}
+			}
+			continue
+		case reviewSecretBackslash:
+			if trimmed != "" {
+				lines[index] = redactReviewMultilineLine(marker, indent)
+			}
+			if !strings.HasSuffix(strings.TrimSpace(content), `\`) {
+				state = reviewMultilineSecretState{}
+			}
+			continue
+		}
+		match := reviewSecretKeyPattern.FindStringIndex(content)
+		if match == nil {
+			continue
+		}
+		state = startReviewMultilineSecret(strings.TrimSpace(content[match[1]:]), indent)
+	}
+	return strings.Join(lines, "\n")
+}
+
+type reviewMultilineSecretMode uint8
+
+const (
+	reviewSecretSingleLine reviewMultilineSecretMode = iota
+	reviewSecretIndentBlock
+	reviewSecretBracketBlock
+	reviewSecretTripleQuoted
+	reviewSecretBackslash
+)
+
+type reviewMultilineSecretState struct {
+	mode      reviewMultilineSecretMode
+	indent    int
+	depth     int
+	delimiter string
+}
+
+func startReviewMultilineSecret(remainder string, indent int) reviewMultilineSecretState {
+	switch remainder {
+	case "", "|", "|-", "|+", ">", ">-", ">+":
+		return reviewMultilineSecretState{mode: reviewSecretIndentBlock, indent: indent}
+	}
+	if strings.HasSuffix(remainder, `\`) {
+		return reviewMultilineSecretState{mode: reviewSecretBackslash}
+	}
+	for _, delimiter := range []string{`"""`, `'''`} {
+		if strings.HasPrefix(remainder, delimiter) && strings.Count(remainder, delimiter)%2 == 1 {
+			return reviewMultilineSecretState{mode: reviewSecretTripleQuoted, delimiter: delimiter}
+		}
+	}
+	if strings.HasPrefix(remainder, "{") || strings.HasPrefix(remainder, "[") {
+		if depth := reviewBracketDelta(remainder); depth > 0 {
+			return reviewMultilineSecretState{mode: reviewSecretBracketBlock, depth: depth}
+		}
+	}
+	return reviewMultilineSecretState{}
+}
+
+func redactReviewMultilineLine(marker string, indent int) string {
+	return marker + strings.Repeat(" ", indent) + "[REDACTED MULTILINE SECRET]"
+}
+
+func reviewBracketDelta(value string) int {
+	depth := 0
+	var quote rune
+	escaped := false
+	for _, current := range value {
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if current == '\\' {
+				escaped = true
+				continue
+			}
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '"' || current == '\'' {
+			quote = current
+			continue
+		}
+		switch current {
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+		}
+	}
+	return depth
+}
+
+func reviewDiffContent(line string) (string, string) {
+	if len(line) == 0 {
+		return "", line
+	}
+	if (line[0] == '+' || line[0] == '-' || line[0] == ' ') &&
+		!strings.HasPrefix(line, "+++") &&
+		!strings.HasPrefix(line, "---") {
+		return line[:1], line[1:]
+	}
+	return "", line
 }
 
 func limitReviewText(value string, limit int) string {

@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"wanxiang-agent/server/internal/config"
+	"wanxiang-agent/server/internal/db"
 	"wanxiang-agent/server/internal/leases"
 )
 
@@ -131,6 +133,84 @@ func TestSupervisorWaitsForDependenciesAndSkipsExistingLease(t *testing.T) {
 		t.Fatalf("duplicate n=%d err=%v", n, err)
 	}
 	svc.Close()
+}
+
+func TestExecutionClaimCapacityIsAtomicAcrossDatabaseConnections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claims.db")
+	firstDB, err := db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstDB.Close()
+	if err := db.Migrate(t.Context(), firstDB); err != nil {
+		t.Fatal(err)
+	}
+	secondDB, err := db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondDB.Close()
+
+	first := NewSupervisor(config.Config{}, firstDB, nil, nil, SupervisorOptions{GlobalLimit: 1})
+	second := NewSupervisor(config.Config{}, secondDB, nil, nil, SupervisorOptions{GlobalLimit: 1})
+	leasesToClaim := []leases.Lease{
+		{LeaseRef: leases.LeaseRef{TaskID: 1, StepID: 1, AgentName: "agent-a", LeaseID: "lease-a", LeaseVersion: 1}},
+		{LeaseRef: leases.LeaseRef{TaskID: 1, StepID: 2, AgentName: "agent-b", LeaseID: "lease-b", LeaseVersion: 1}},
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for index, supervisor := range []*Supervisor{first, second} {
+		index, supervisor := index, supervisor
+		go func() {
+			<-start
+			_, claimErr := supervisor.claimExecution(t.Context(), leasesToClaim[index], 4)
+			results <- claimErr
+		}()
+	}
+	close(start)
+	successes, capacity := 0, 0
+	for range 2 {
+		switch claimErr := <-results; {
+		case claimErr == nil:
+			successes++
+		case errors.Is(claimErr, errExecutionCapacity):
+			capacity++
+		default:
+			t.Fatalf("unexpected claim error: %v", claimErr)
+		}
+	}
+	if successes != 1 || capacity != 1 {
+		t.Fatalf("successes=%d capacity=%d", successes, capacity)
+	}
+}
+
+func TestExecutionClaimReclaimsDeadPIDBeforeExpiry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dead-pid.db")
+	conn, err := db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := db.Migrate(t.Context(), conn); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+	if _, err := conn.Exec(`insert into executor_runs(
+			task_id,step_id,agent_name,lease_id,lease_version,pid,pid_start_ticks,status,
+			claim_token,claim_owner,claim_expires_at,created_at,updated_at
+		) values(1,1,'agent-a','dead-lease',1,1073741824,1,'running','stale-token','old-owner',?,datetime('now'),datetime('now'))`, future); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := NewSupervisor(config.Config{}, conn, nil, nil, SupervisorOptions{GlobalLimit: 1})
+	claim, err := supervisor.claimExecution(t.Context(), leases.Lease{
+		LeaseRef: leases.LeaseRef{TaskID: 1, StepID: 1, AgentName: "agent-a", LeaseID: "dead-lease", LeaseVersion: 1},
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim.Token == "" || claim.Token == "stale-token" {
+		t.Fatalf("claim token=%q", claim.Token)
+	}
 }
 
 func supervisorFixture(t *testing.T, withEnv bool) (config.Config, *sql.DB, *leases.Service, int64, int64) {

@@ -294,15 +294,16 @@ func readFilePrefix(path string, limit int) ([]byte, error) {
 }
 
 var (
-	memorySecretKeyPattern = regexp.MustCompile(`(?i)(api[_-]?key|authorization|password|passwd|secret|cookie|token|credential|private[_-]?key|access[_-]?key)`)
-	memoryTokenPattern     = regexp.MustCompile(`(?i)\b(sk-[A-Za-z0-9_-]{8,}|github_pat_[A-Za-z0-9_]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|AKIA[A-Z0-9]{12,})\b`)
-	memoryJWTPattern       = regexp.MustCompile(`\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`)
-	memoryURLUserPattern   = regexp.MustCompile(`(?i)(https?://)[^/\s:@]+:[^/\s@]+@`)
+	memorySecretKeyPattern        = regexp.MustCompile(`(?i)(api[_-]?key|authorization|password|passwd|secret|cookie|token|credential|private[_-]?key|access[_-]?key)`)
+	memorySecretAssignmentPattern = regexp.MustCompile(`(?i)\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|authorization|password|passwd|secret(?:[_-]?key)?|cookie|token|credential|private[_-]?key|access[_-]?key)\b["'\x60]?\s*[:=]`)
+	memoryTokenPattern            = regexp.MustCompile(`(?i)\b(sk-[A-Za-z0-9_-]{8,}|github_pat_[A-Za-z0-9_]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|AKIA[A-Z0-9]{12,})\b`)
+	memoryJWTPattern              = regexp.MustCompile(`\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`)
+	memoryURLUserPattern          = regexp.MustCompile(`(?i)(https?://)[^/\s:@]+:[^/\s@]+@`)
 )
 
 func redactMemory(content string) string {
 	lines := strings.Split(content, "\n")
-	secretIndent := -1
+	state := memoryMultilineSecretState{}
 	inPrivateBlock := false
 	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -320,25 +321,46 @@ func redactMemory(content string) string {
 			inPrivateBlock = true
 			continue
 		}
-		if secretIndent >= 0 && trimmed != "" && indent > secretIndent {
-			lines[index] = "[已脱敏]"
+		switch state.mode {
+		case memorySecretIndentBlock:
+			if trimmed == "" {
+				continue
+			}
+			if indent > state.indent || (indent == state.indent && strings.HasPrefix(trimmed, "-")) {
+				lines[index] = "[已脱敏]"
+				continue
+			}
+			state = memoryMultilineSecretState{}
+		case memorySecretBracketBlock:
+			if trimmed != "" {
+				lines[index] = "[已脱敏]"
+			}
+			state.depth += memoryBracketDelta(line)
+			if state.depth <= 0 {
+				state = memoryMultilineSecretState{}
+			}
 			continue
-		}
-		if secretIndent >= 0 && trimmed != "" {
-			secretIndent = -1
+		case memorySecretTripleQuoted:
+			if trimmed != "" {
+				lines[index] = "[已脱敏]"
+			}
+			if strings.Count(line, state.delimiter)%2 == 1 {
+				state = memoryMultilineSecretState{}
+			}
+			continue
+		case memorySecretBackslash:
+			if trimmed != "" {
+				lines[index] = "[已脱敏]"
+			}
+			if !strings.HasSuffix(strings.TrimSpace(line), `\`) {
+				state = memoryMultilineSecretState{}
+			}
+			continue
 		}
 		if memorySecretKeyPattern.MatchString(lower) || strings.Contains(lower, "bearer ") {
 			lines[index] = "[已脱敏]"
-			if strings.HasSuffix(trimmed, ":") ||
-				strings.HasSuffix(trimmed, "[") ||
-				strings.HasSuffix(trimmed, "{") ||
-				strings.HasSuffix(trimmed, "|") ||
-				strings.HasSuffix(trimmed, ">") ||
-				strings.HasSuffix(trimmed, "|-") ||
-				strings.HasSuffix(trimmed, ">-") {
-				secretIndent = indent
-			} else {
-				secretIndent = -1
+			if match := memorySecretAssignmentPattern.FindStringIndex(line); match != nil {
+				state = startMemoryMultilineSecret(strings.TrimSpace(line[match[1]:]), indent)
 			}
 			continue
 		}
@@ -351,6 +373,77 @@ func redactMemory(content string) string {
 		lines[index] = sanitized
 	}
 	return strings.Join(lines, "\n")
+}
+
+type memoryMultilineSecretMode uint8
+
+const (
+	memorySecretSingleLine memoryMultilineSecretMode = iota
+	memorySecretIndentBlock
+	memorySecretBracketBlock
+	memorySecretTripleQuoted
+	memorySecretBackslash
+)
+
+type memoryMultilineSecretState struct {
+	mode      memoryMultilineSecretMode
+	indent    int
+	depth     int
+	delimiter string
+}
+
+func startMemoryMultilineSecret(remainder string, indent int) memoryMultilineSecretState {
+	switch remainder {
+	case "", "|", "|-", "|+", ">", ">-", ">+":
+		return memoryMultilineSecretState{mode: memorySecretIndentBlock, indent: indent}
+	}
+	if strings.HasSuffix(remainder, `\`) {
+		return memoryMultilineSecretState{mode: memorySecretBackslash}
+	}
+	for _, delimiter := range []string{`"""`, `'''`} {
+		if strings.HasPrefix(remainder, delimiter) && strings.Count(remainder, delimiter)%2 == 1 {
+			return memoryMultilineSecretState{mode: memorySecretTripleQuoted, delimiter: delimiter}
+		}
+	}
+	if strings.HasPrefix(remainder, "{") || strings.HasPrefix(remainder, "[") {
+		if depth := memoryBracketDelta(remainder); depth > 0 {
+			return memoryMultilineSecretState{mode: memorySecretBracketBlock, depth: depth}
+		}
+	}
+	return memoryMultilineSecretState{}
+}
+
+func memoryBracketDelta(value string) int {
+	depth := 0
+	var quote rune
+	escaped := false
+	for _, current := range value {
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if current == '\\' {
+				escaped = true
+				continue
+			}
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '"' || current == '\'' {
+			quote = current
+			continue
+		}
+		switch current {
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+		}
+	}
+	return depth
 }
 
 func looksLikeBareSecret(value string) bool {

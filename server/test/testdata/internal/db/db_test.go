@@ -73,6 +73,7 @@ func TestMission07MigrationCreatesReportReviewAndNotificationSchema(t *testing.T
 		"completion_reports":    {"project_id", "task_id", "step_id", "lease_id", "lease_version", "agent_name", "agent_role", "version", "source_branch", "checkpoint_commit", "head_commit", "completed_json", "incomplete_json", "key_files_json", "tests_json", "risks_json", "dependencies_json", "merge_order_json", "user_decision", "created_at"},
 		"merge_requests":        {"report_id", "step_id", "lease_id", "report_version", "source_commit", "project_lead", "reviewed_at", "approved_at", "merged_by", "merge_commit"},
 		"manager_notifications": {"project_id", "task_id", "mr_id", "report_id", "project_lead", "main_commit", "payload_json", "status", "created_at"},
+		"pipeline_rollbacks":    {"expected_head"},
 	}
 	for table, columns := range required {
 		for _, column := range columns {
@@ -91,6 +92,44 @@ func TestMission07MigrationCreatesReportReviewAndNotificationSchema(t *testing.T
 	}
 	if _, err := conn.Exec(`insert into completion_reports(project_id,task_id,step_id,lease_id,lease_version,agent_name,agent_role,version,source_branch,checkpoint_commit,head_commit,completed_json,incomplete_json,key_files_json,tests_json,risks_json,dependencies_json,merge_order_json,user_decision,created_at) values(1,1,1,'lease',1,'agent','worker',1,'agent/a/task','abc','abc','[]','[]','[]','[]','[]','[]','[]','','now')`); err == nil {
 		t.Fatal("duplicate report version accepted")
+	}
+}
+
+func TestMigrateAddsExpectedHeadToLegacyPipelineRollbacks(t *testing.T) {
+	conn, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err = conn.Exec(`create table pipeline_rollbacks (
+		id integer primary key,
+		run_id integer not null unique,
+		safe_commit text not null,
+		status text not null,
+		confirmed_by text not null default '',
+		confirmed_at text,
+		started_at text,
+		created_at text not null,
+		completed_at text,
+		last_error text not null default ''
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(`insert into pipeline_rollbacks(run_id,safe_commit,status,created_at)
+		values(1,'safe','awaiting_confirmation','now')`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err = Migrate(t.Context(), conn); err != nil {
+			t.Fatalf("Migrate pass %d: %v", i+1, err)
+		}
+	}
+	var expectedHead string
+	if err = conn.QueryRow(`select expected_head from pipeline_rollbacks where run_id=1`).Scan(&expectedHead); err != nil {
+		t.Fatal(err)
+	}
+	if expectedHead != "" {
+		t.Fatalf("legacy expected_head=%q", expectedHead)
 	}
 }
 

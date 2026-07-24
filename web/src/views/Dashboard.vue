@@ -163,6 +163,14 @@ import { useEventsStore } from '../stores/events'
 import { useTasksStore } from '../stores/tasks'
 
 type DrawerMode = 'agent' | 'create' | 'tasks'
+type PendingTaskSubmission = {
+  version: 1
+  idempotencyKey: string
+  fingerprint: string
+}
+
+const pendingTaskSubmissionStorageKey = 'wanxiang.task-create-pending.v1'
+const pendingTaskSubmission = readPendingTaskSubmission()
 
 const events = useEventsStore()
 const tasks = useTasksStore()
@@ -173,8 +181,8 @@ const agentError = ref('')
 const taskTitle = ref('')
 const taskDescription = ref('')
 const creatingTask = ref(false)
-const taskIdempotencyKey = ref(createTaskIdempotencyKey())
-const taskSubmissionFingerprint = ref('')
+const taskIdempotencyKey = ref(pendingTaskSubmission?.idempotencyKey || createTaskIdempotencyKey())
+const taskSubmissionFingerprint = ref(pendingTaskSubmission?.fingerprint || '')
 const projects = ref<Project[]>([])
 const projectMode = ref<'new' | 'existing'>('new')
 const selectedProjectID = ref<number>()
@@ -203,6 +211,54 @@ function createTaskIdempotencyKey() {
     return globalThis.crypto.randomUUID()
   }
   return `task-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+/** 读取刷新前尚未确认成功的任务提交标识，不保存任务标题或正文。 */
+function readPendingTaskSubmission(): PendingTaskSubmission | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(pendingTaskSubmissionStorageKey)
+    if (!raw) return null
+    const value = JSON.parse(raw) as Partial<PendingTaskSubmission>
+    if (
+      value.version !== 1 ||
+      typeof value.idempotencyKey !== 'string' ||
+      value.idempotencyKey.length < 8 ||
+      value.idempotencyKey.length > 200 ||
+      typeof value.fingerprint !== 'string' ||
+      value.fingerprint.length === 0 ||
+      value.fingerprint.length > 256
+    ) {
+      window.sessionStorage.removeItem(pendingTaskSubmissionStorageKey)
+      return null
+    }
+    return value as PendingTaskSubmission
+  } catch {
+    return null
+  }
+}
+
+/** 保存本标签页待确认提交的幂等键和指纹，支持响应丢失后的刷新重试。 */
+function persistPendingTaskSubmission(idempotencyKey: string, fingerprint: string) {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(
+      pendingTaskSubmissionStorageKey,
+      JSON.stringify({ version: 1, idempotencyKey, fingerprint } satisfies PendingTaskSubmission)
+    )
+  } catch {
+    // 浏览器禁用存储时仍由服务端与当前页面内存幂等保护。
+  }
+}
+
+/** 清除已经收到成功响应的任务提交标识。 */
+function clearPendingTaskSubmission() {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.removeItem(pendingTaskSubmissionStorageKey)
+  } catch {
+    // 忽略浏览器存储不可用，避免影响已成功的任务流程。
+  }
 }
 
 /** 将抽屉宽度同步为 Element Plus 可解析的响应式像素值。 */
@@ -283,6 +339,7 @@ async function resetAgentLayout() {
 
 /** 重置任务创建表单并生成下一次提交使用的幂等键。 */
 function resetTaskComposer() {
+  clearPendingTaskSubmission()
   taskTitle.value = ''
   taskDescription.value = ''
   projectMode.value = 'new'
@@ -291,13 +348,30 @@ function resetTaskComposer() {
   taskSubmissionFingerprint.value = ''
 }
 
-/** 计算任务表单业务载荷指纹，用于区分原样重试和编辑后的新请求。 */
-function currentTaskSubmissionFingerprint() {
-  return JSON.stringify({
+/** 计算不含任务正文的稳定摘要，用于区分原样重试和编辑后的新请求。 */
+async function currentTaskSubmissionFingerprint() {
+  const payload = JSON.stringify({
     title: taskTitle.value.trim(),
     description: taskDescription.value,
     project_id: projectMode.value === 'existing' ? selectedProjectID.value : null
   })
+  const bytes = new TextEncoder().encode(payload)
+  if (typeof globalThis.crypto?.subtle?.digest === 'function') {
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+    return `sha256:${Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('')}`
+  }
+  return fallbackTaskSubmissionFingerprint(bytes)
+}
+
+/** 在缺少 Web Crypto 时生成不含原文的多路稳定摘要。 */
+function fallbackTaskSubmissionFingerprint(bytes: Uint8Array) {
+  const hashes = [0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35]
+  for (const value of bytes) {
+    for (let index = 0; index < hashes.length; index += 1) {
+      hashes[index] = Math.imul(hashes[index] ^ (value + index * 17), 0x01000193)
+    }
+  }
+  return `fnv128:${hashes.map((value) => (value >>> 0).toString(16).padStart(8, '0')).join('')}`
 }
 
 /** 防重提交任务，成功时关闭重置，失败时保留用户输入。 */
@@ -311,13 +385,14 @@ async function createTask() {
     ElMessage.warning('请选择要复用的项目')
     return
   }
-  const fingerprint = currentTaskSubmissionFingerprint()
-  if (taskSubmissionFingerprint.value && taskSubmissionFingerprint.value !== fingerprint) {
-    taskIdempotencyKey.value = createTaskIdempotencyKey()
-  }
-  taskSubmissionFingerprint.value = fingerprint
   creatingTask.value = true
   try {
+    const fingerprint = await currentTaskSubmissionFingerprint()
+    if (taskSubmissionFingerprint.value && taskSubmissionFingerprint.value !== fingerprint) {
+      taskIdempotencyKey.value = createTaskIdempotencyKey()
+    }
+    taskSubmissionFingerprint.value = fingerprint
+    persistPendingTaskSubmission(taskIdempotencyKey.value, fingerprint)
     await createAdminTask(
       taskTitle.value,
       taskDescription.value,

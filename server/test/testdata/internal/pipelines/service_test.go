@@ -48,3 +48,32 @@ func TestValidateRejectsAmbiguousMultipleBuildArtifacts(t *testing.T) {
 		t.Fatal("multiple build artifacts accepted")
 	}
 }
+
+func TestConfirmRollbackRejectsLegacyRowWithoutExpectedHead(t *testing.T) {
+	db := testutil.OpenDB(t)
+	service := NewService(db)
+	definition := Definition{Steps: []StepDefinition{{
+		ID: "build", Kind: "build", Command: "go", Args: []string{"build", "./..."},
+		Artifact: "app.bin", TimeoutSeconds: 30, MaxAttempts: 1, Reversible: true,
+	}}}
+	run, err := service.Start(t.Context(), StartInput{
+		ProjectID: 1, Definition: definition, SafeCommit: "safe",
+		IdempotencyKey: "legacy-rollback", RequestedBy: "admin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`insert into pipeline_rollbacks(run_id,safe_commit,expected_head,status,created_at)
+		values(?,?,'','awaiting_confirmation','now')`, run.ID, "safe"); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.ConfirmRollback(t.Context(), run.ID, "admin"); err == nil {
+		t.Fatal("legacy rollback without expected_head was confirmed")
+	}
+	if _, err = db.Exec(`update pipeline_rollbacks set expected_head='expected' where run_id=?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.ConfirmRollback(t.Context(), run.ID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -37,9 +37,18 @@ func (s *Service) ReconcileTask(ctx context.Context, taskID int64) (TaskWorkspac
 	lock := s.projectLock(projectID)
 	lock.Lock()
 	defer lock.Unlock()
-	if err := s.db.QueryRowContext(ctx, `select p.dir,t.status from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).
-		Scan(&projectDir, &taskStatus); err != nil {
+	releaseProjectLock, lockErr := gitx.AcquireProjectLock(ctx, s.cfg.DataDir, projectID)
+	if lockErr != nil {
+		return TaskWorkspace{}, fmt.Errorf("acquire project git lock: %w", lockErr)
+	}
+	defer releaseProjectLock()
+	lockedProjectID := projectID
+	if err := s.db.QueryRowContext(ctx, `select p.id,p.dir,t.status from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).
+		Scan(&projectID, &projectDir, &taskStatus); err != nil {
 		return TaskWorkspace{}, err
+	}
+	if projectID != lockedProjectID {
+		return TaskWorkspace{}, errors.New("task project changed while waiting for project lock")
 	}
 	if taskStatus != "workspace_ready" {
 		return s.GetTask(ctx, taskID)
@@ -157,12 +166,38 @@ func (s *Service) RepairTask(ctx context.Context, taskID int64, direction Repair
 	if direction != RepairFromDatabase && direction != RepairFromGitSnapshot {
 		return TaskWorkspace{}, errors.New("invalid repair direction")
 	}
-	workspace, err := s.GetTask(ctx, taskID)
-	if err != nil {
+	var projectID int64
+	var projectDir string
+	if err := s.db.QueryRowContext(ctx, `select p.id,p.dir from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&projectID, &projectDir); err != nil {
 		return TaskWorkspace{}, err
 	}
-	var projectDir string
-	if err = s.db.QueryRowContext(ctx, `select p.dir from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&projectDir); err != nil {
+	projectLock := s.projectLock(projectID)
+	projectLock.Lock()
+	releaseProjectLock, err := gitx.AcquireProjectLock(ctx, s.cfg.DataDir, projectID)
+	if err != nil {
+		projectLock.Unlock()
+		return TaskWorkspace{}, fmt.Errorf("acquire project git lock: %w", err)
+	}
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			releaseProjectLock()
+			projectLock.Unlock()
+		}
+	}()
+	var lockedProjectID int64
+	if err = s.db.QueryRowContext(ctx, `select p.id,p.dir from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&lockedProjectID, &projectDir); err != nil {
+		return TaskWorkspace{}, err
+	}
+	if lockedProjectID != projectID {
+		return TaskWorkspace{}, errors.New("task project changed while waiting for git lock")
+	}
+	projectDir, err = files.UnderRoot(s.cfg.ProjectDir, projectDir)
+	if err != nil {
+		return TaskWorkspace{}, fmt.Errorf("unsafe project path: %w", err)
+	}
+	workspace, err := s.GetTask(ctx, taskID)
+	if err != nil {
 		return TaskWorkspace{}, err
 	}
 	for _, item := range workspace.Items {
@@ -223,6 +258,9 @@ func (s *Service) RepairTask(ctx context.Context, taskID int64, direction Repair
 	_, _ = s.db.ExecContext(ctx, `update tasks set status='workspace_ready' where id=?`, taskID)
 	payload, _ := json.Marshal(map[string]any{"task_id": taskID, "direction": direction})
 	_, _ = s.db.ExecContext(ctx, `insert into audit_logs(actor,action,target,payload_json,created_at) values(?,'workspace.repair',?,?,?)`, actor, fmt.Sprintf("task:%d", taskID), string(payload), timestamp())
+	releaseProjectLock()
+	projectLock.Unlock()
+	lockHeld = false
 	return s.ReconcileTask(ctx, taskID)
 }
 
@@ -245,12 +283,32 @@ func (s *Service) RequestCleanup(ctx context.Context, taskID int64, confirmed bo
 
 // ConfirmCleanup 复核现场后移除任务 Worktree。
 func (s *Service) ConfirmCleanup(ctx context.Context, taskID int64, actor string) (TaskWorkspace, error) {
-	workspace, err := s.GetTask(ctx, taskID)
-	if err != nil {
+	var projectID int64
+	var projectDir string
+	if err := s.db.QueryRowContext(ctx, `select p.id,p.dir from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&projectID, &projectDir); err != nil {
 		return TaskWorkspace{}, err
 	}
-	var projectDir string
-	if err = s.db.QueryRowContext(ctx, `select p.dir from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&projectDir); err != nil {
+	projectLock := s.projectLock(projectID)
+	projectLock.Lock()
+	defer projectLock.Unlock()
+	releaseProjectLock, err := gitx.AcquireProjectLock(ctx, s.cfg.DataDir, projectID)
+	if err != nil {
+		return TaskWorkspace{}, fmt.Errorf("acquire project git lock: %w", err)
+	}
+	defer releaseProjectLock()
+	var lockedProjectID int64
+	if err = s.db.QueryRowContext(ctx, `select p.id,p.dir from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&lockedProjectID, &projectDir); err != nil {
+		return TaskWorkspace{}, err
+	}
+	if lockedProjectID != projectID {
+		return TaskWorkspace{}, errors.New("task project changed while waiting for git lock")
+	}
+	projectDir, err = files.UnderRoot(s.cfg.ProjectDir, projectDir)
+	if err != nil {
+		return TaskWorkspace{}, fmt.Errorf("unsafe project path: %w", err)
+	}
+	workspace, err := s.GetTask(ctx, taskID)
+	if err != nil {
 		return TaskWorkspace{}, err
 	}
 	for _, item := range workspace.Items {

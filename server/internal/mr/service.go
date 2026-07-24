@@ -121,6 +121,23 @@ func (s *Service) ManagerMerge(ctx context.Context, mrID int64, actor string) er
 	if err != nil {
 		return fmt.Errorf("invalid project directory: %w", err)
 	}
+	lockedProjectID := record.ProjectID
+	releaseProjectLock, err := gitx.AcquireProjectLock(ctx, s.cfg.DataDir, lockedProjectID)
+	if err != nil {
+		return fmt.Errorf("acquire project git lock: %w", err)
+	}
+	defer releaseProjectLock()
+	record, err = s.loadMergeRecord(ctx, mrID)
+	if err != nil {
+		return err
+	}
+	if record.ProjectID != lockedProjectID || record.TargetBranch != "main" || record.Status != "open" {
+		return errors.New("merge request changed while waiting for project lock")
+	}
+	projectDir, err = files.UnderRoot(s.cfg.ProjectDir, record.ProjectDir)
+	if err != nil {
+		return fmt.Errorf("invalid project directory: %w", err)
+	}
 	ready, err := s.managerReady(ctx)
 	if err != nil {
 		return err

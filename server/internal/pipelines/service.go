@@ -85,14 +85,19 @@ func (s *Service) ConfirmRollback(ctx context.Context, runID int64, actor string
 	if actor == "" {
 		return ErrConfirmationRequired
 	}
-	res, err := s.db.ExecContext(ctx, `update pipeline_rollbacks set status='pending',confirmed_by=?,confirmed_at=?,last_error='' where run_id=? and status in ('awaiting_confirmation','failed')`, actor, time.Now().UTC().Format(time.RFC3339Nano), runID)
+	res, err := s.db.ExecContext(ctx, `update pipeline_rollbacks
+		set status='pending',confirmed_by=?,confirmed_at=?,last_error=''
+		where run_id=? and status in ('awaiting_confirmation','failed')
+			and expected_head<>''`,
+		actor, time.Now().UTC().Format(time.RFC3339Nano), runID)
 	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n != 1 {
 		var confirmed string
-		if err = s.db.QueryRowContext(ctx, `select confirmed_by from pipeline_rollbacks where run_id=?`, runID).Scan(&confirmed); err == nil && confirmed == actor {
+		if err = s.db.QueryRowContext(ctx, `select confirmed_by from pipeline_rollbacks
+			where run_id=? and status='pending' and expected_head<>''`, runID).Scan(&confirmed); err == nil && confirmed == actor {
 			return nil
 		}
 		return ErrConfirmationRequired

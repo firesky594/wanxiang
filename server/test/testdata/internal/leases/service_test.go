@@ -181,5 +181,5 @@ func leaseFixture(t *testing.T) (*Service, *sql.DB, *FakeClock, int64, int64) {
 	}
 	clock := NewFakeClock(time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC))
 	workspaceService := workspaces.NewService(config.Config{}, conn, nil)
-	return NewService(conn, clock, workspaceService), conn, clock, taskID, stepID
+	return NewService(conn, clock, workspaceService, t.TempDir()), conn, clock, taskID, stepID
 }

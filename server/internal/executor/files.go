@@ -155,13 +155,25 @@ func validateWorkerPath(path string) (string, error) {
 		return "", errors.New("invalid worker path")
 	}
 	clean := filepath.Clean(path)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || strings.HasPrefix(clean, ":") {
 		return "", errors.New("worker path escapes workspace")
 	}
 	parts := strings.Split(filepath.ToSlash(clean), "/")
 	for _, part := range parts {
 		lower := strings.ToLower(part)
-		if lower == ".git" || lower == ".env" || lower == "env" || strings.HasSuffix(lower, ".env") {
+		extension := strings.ToLower(filepath.Ext(lower))
+		if strings.HasPrefix(part, ":") ||
+			lower == ".git" || lower == ".env" || lower == "env" || strings.HasSuffix(lower, ".env") ||
+			lower == "credentials" || strings.HasPrefix(lower, "credentials.") ||
+			lower == "credential" || strings.HasPrefix(lower, "credential.") ||
+			lower == "secrets" || lower == ".secrets" || strings.HasPrefix(lower, "secrets.") ||
+			lower == "secret" || strings.HasPrefix(lower, "secret.") ||
+			lower == ".ssh" || lower == ".aws" || lower == ".docker" || lower == ".gnupg" || lower == ".kube" ||
+			lower == ".npmrc" || lower == ".pypirc" || lower == ".netrc" ||
+			lower == ".git-credentials" ||
+			lower == "id_rsa" || lower == "id_ed25519" || lower == "service-account.json" ||
+			extension == ".pem" || extension == ".key" || extension == ".p12" ||
+			extension == ".pfx" || extension == ".jks" || extension == ".keystore" {
 			return "", errors.New("sensitive path is platform managed")
 		}
 	}

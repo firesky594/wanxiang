@@ -35,6 +35,40 @@ type CheckpointInput struct {
 
 // CreateCheckpoint 校验租约与 Git 状态后持久化检查点。
 func (s *Service) CreateCheckpoint(ctx context.Context, ref LeaseRef, input CheckpointInput) (Checkpoint, error) {
+	return s.createCheckpoint(ctx, 0, ref, input)
+}
+
+// CreateCheckpointUnderProjectLock 在调用方已持有指定项目锁时持久化检查点。
+func (s *Service) CreateCheckpointUnderProjectLock(ctx context.Context, projectID int64, ref LeaseRef, input CheckpointInput) (Checkpoint, error) {
+	if projectID <= 0 {
+		return Checkpoint{}, ErrConflict
+	}
+	return s.createCheckpoint(ctx, projectID, ref, input)
+}
+
+func (s *Service) createCheckpoint(ctx context.Context, lockedProjectID int64, ref LeaseRef, input CheckpointInput) (Checkpoint, error) {
+	var projectID int64
+	if err := s.db.QueryRowContext(ctx, `select t.project_id from tasks t
+		join task_steps ts on ts.task_id=t.id where t.id=? and ts.id=? and t.project_id is not null`,
+		ref.TaskID, ref.StepID).Scan(&projectID); err != nil {
+		return Checkpoint{}, ErrConflict
+	}
+	if lockedProjectID == 0 {
+		if s.dataDir == "" {
+			return Checkpoint{}, errors.New("checkpoint project lock is unavailable")
+		}
+		releaseProjectLock, err := gitx.AcquireProjectLock(ctx, s.dataDir, projectID)
+		if err != nil {
+			return Checkpoint{}, fmt.Errorf("acquire project git lock: %w", err)
+		}
+		defer releaseProjectLock()
+		lockedProjectID = projectID
+	}
+	if err := s.db.QueryRowContext(ctx, `select t.project_id from tasks t
+		join task_steps ts on ts.task_id=t.id where t.id=? and ts.id=? and t.project_id is not null`,
+		ref.TaskID, ref.StepID).Scan(&projectID); err != nil || projectID != lockedProjectID {
+		return Checkpoint{}, ErrConflict
+	}
 	if err := s.validateActiveRef(ctx, ref); err != nil {
 		return Checkpoint{}, err
 	}
@@ -61,9 +95,11 @@ func (s *Service) CreateCheckpoint(ctx context.Context, ref LeaseRef, input Chec
 	}
 
 	var workspacePath, branchName, baseCommit, provisionCommit, workspaceStatus, owner string
-	err = s.db.QueryRowContext(ctx, `select worktree_path,branch_name,base_commit,provision_commit,status,agent_name from project_workspaces where task_id=? and step_id=?`, ref.TaskID, ref.StepID).
-		Scan(&workspacePath, &branchName, &baseCommit, &provisionCommit, &workspaceStatus, &owner)
-	if err != nil || workspaceStatus != "ready" || owner != ref.AgentName {
+	var workspaceProjectID int64
+	err = s.db.QueryRowContext(ctx, `select project_id,worktree_path,branch_name,base_commit,provision_commit,status,agent_name
+		from project_workspaces where task_id=? and step_id=?`, ref.TaskID, ref.StepID).
+		Scan(&workspaceProjectID, &workspacePath, &branchName, &baseCommit, &provisionCommit, &workspaceStatus, &owner)
+	if err != nil || workspaceProjectID != lockedProjectID || workspaceStatus != "ready" || owner != ref.AgentName {
 		return Checkpoint{}, ErrConflict
 	}
 	if err := validateGitCheckpoint(ctx, workspacePath, branchName, baseCommit, provisionCommit, ref.StepID, input); err != nil {
@@ -106,10 +142,41 @@ func (s *Service) CreateCheckpoint(ctx context.Context, ref LeaseRef, input Chec
 		return Checkpoint{}, err
 	}
 	if err = tx.Commit(); err != nil {
+		persisted, found, confirmErr := s.confirmCheckpointCommit(ref.LeaseID, input.IdempotencyKey)
+		if found {
+			return persisted, nil
+		}
+		if confirmErr != nil {
+			return Checkpoint{}, errors.Join(err, fmt.Errorf("checkpoint commit outcome is uncertain: %w", confirmErr))
+		}
 		_ = os.Remove(mirrorPath)
 		return Checkpoint{}, err
 	}
 	return Checkpoint{ID: id, TaskID: ref.TaskID, StepID: ref.StepID, LeaseID: ref.LeaseID, IdempotencyKey: input.IdempotencyKey, GitCommit: input.GitCommit, BranchName: input.BranchName, Clean: input.Clean, SummaryHash: hash, HighRisk: input.HighRisk, CreatedAt: now}, nil
+}
+
+func (s *Service) confirmCheckpointCommit(leaseID, idempotencyKey string) (Checkpoint, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for attempt := 0; attempt < 2; attempt++ {
+		checkpoint, err := s.checkpointByKey(ctx, leaseID, idempotencyKey)
+		if err == nil {
+			return checkpoint, true, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Checkpoint{}, false, err
+		}
+		if attempt == 0 {
+			timer := time.NewTimer(25 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return Checkpoint{}, false, ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return Checkpoint{}, false, nil
 }
 
 // GetCheckpoint 按编号查询检查点基础信息。

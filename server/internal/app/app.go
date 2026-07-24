@@ -89,7 +89,7 @@ func New(cfg config.Config) (*App, error) {
 		var dir string
 		err := conn.QueryRow(`select dir from projects where id=?`, projectID).Scan(&dir)
 		return dir, err
-	})
+	}, cfg.DataDir)
 	pipelineWorker.Start()
 	return &App{
 		Config:        cfg,

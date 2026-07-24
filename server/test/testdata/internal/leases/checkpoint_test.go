@@ -1,11 +1,14 @@
 package leases
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"wanxiang-agent/server/internal/gitx"
 )
@@ -47,6 +50,33 @@ func TestCheckpointValidatesGitAndIsIdempotent(t *testing.T) {
 	content, err := os.ReadFile(mirror)
 	if err != nil || !strings.Contains(string(content), "next_action") {
 		t.Fatalf("mirror content=%q err=%v", content, err)
+	}
+}
+
+func TestCheckpointWaitsForSharedProjectLock(t *testing.T) {
+	svc, conn, _, taskID, stepID := leaseFixture(t)
+	repo, base := checkpointRepo(t)
+	if _, err := conn.Exec(`update project_workspaces set worktree_path=?,base_commit=?,provision_commit=?,write_scope_json='["."]' where step_id=?`, repo, base, base, stepID); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := svc.Acquire(t.Context(), taskID, stepID, "agent-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := commitCheckpoint(t, repo, stepID)
+	var projectID int64
+	if err := conn.QueryRow(`select project_id from tasks where id=?`, taskID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	release, err := gitx.AcquireProjectLock(t.Context(), svc.dataDir, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Millisecond)
+	defer cancel()
+	if _, err := svc.CreateCheckpoint(ctx, lease.LeaseRef, validCheckpointInput(commit)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("checkpoint lock err=%v", err)
 	}
 }
 

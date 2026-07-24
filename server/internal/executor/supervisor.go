@@ -191,10 +191,6 @@ func (s *Supervisor) Scan(ctx context.Context) (int, error) {
 			}
 			continue
 		}
-		token, err := s.issueToken(ctx, item.agent)
-		if err != nil {
-			return started, err
-		}
 		var lease leases.Lease
 		if item.leaseID == "" {
 			lease, err = s.leases.Acquire(ctx, item.taskID, item.stepID, item.agent)
@@ -212,9 +208,9 @@ func (s *Supervisor) Scan(ctx context.Context) (int, error) {
 				ExpiresAt: expires,
 			}
 		}
-		claim, err := s.claimExecution(ctx, lease)
+		claim, err := s.claimExecution(ctx, lease, definition.MaxConcurrency)
 		if err != nil {
-			if errors.Is(err, errExecutionClaimHeld) {
+			if errors.Is(err, errExecutionClaimHeld) || errors.Is(err, errExecutionCapacity) {
 				continue
 			}
 			if errors.Is(err, errContinuationBlocked) {
@@ -232,6 +228,11 @@ func (s *Supervisor) Scan(ctx context.Context) (int, error) {
 			return started, err
 		}
 		claim.Lease = lease
+		token, err := s.issueToken(ctx, item.agent)
+		if err != nil {
+			_ = s.releaseExecutionClaim(context.Background(), claim, "waiting", err.Error())
+			return started, err
+		}
 		input := WorkerInput{TaskID: item.taskID, StepID: item.stepID, AgentName: item.agent, LeaseID: lease.LeaseID, LeaseVersion: lease.LeaseVersion, ClaimToken: claim.Token, ServerURL: workerServerURL(s.cfg.HTTPAddr), AgentToken: token}
 		process, err := s.launcher.Launch(ctx, WorkerLaunch{Input: input, Env: env})
 		if err != nil {

@@ -1,6 +1,5 @@
 <template>
   <section class="console delivery-console">
-    <header class="topbar"><RouterLink class="brand" to="/dashboard"><span class="brand-mark"><el-icon><Cpu /></el-icon></span><span>Wanxiang Agent</span></RouterLink><nav class="nav" aria-label="主导航"><RouterLink to="/dashboard">调度台</RouterLink><RouterLink to="/mrs">MR</RouterLink><RouterLink to="/issues">Issue</RouterLink></nav></header>
     <main class="main">
       <div class="page-head"><div><p class="eyebrow">DELIVERY CONTROL</p><h1>交付验收</h1><p>按不可变版本核对提交、Agent、测试与风险，再决定验收或进入下一轮返工。</p></div><el-button plain :loading="loading" @click="load">刷新</el-button></div>
       <div class="summary-strip"><div><strong>{{items.length}}</strong><span>交付版本</span></div><div><strong>{{awaiting}}</strong><span>待验收</span></div><div><strong>{{accepted}}</strong><span>已验收</span></div></div>
@@ -20,7 +19,7 @@
   </section>
 </template>
 <script setup lang="ts">
-import {computed,onMounted,ref} from 'vue';import {RouterLink} from 'vue-router';import {Cpu} from '@element-plus/icons-vue';import {ElMessage} from 'element-plus';import {decideDelivery,getDelivery,listDeliveries,type DeliveryDetail,type DeliverySnapshot} from '../api/client'
+import {computed,onMounted,ref} from 'vue';import {ElMessage} from 'element-plus';import {decideDelivery,getDelivery,listDeliveries,type DeliveryDetail,type DeliverySnapshot} from '../api/client'
 const items=ref<DeliverySnapshot[]>([]),selected=ref<DeliveryDetail|null>(null),loading=ref(false),submitting=ref(false),comment=ref(''),error=ref(''),validation=ref(''),decisionKey=ref('');const awaiting=computed(()=>items.value.filter(x=>x.status==='awaiting_acceptance').length),accepted=computed(()=>items.value.filter(x=>x.status==='accepted').length);const labels:Record<string,string>={awaiting_acceptance:'待验收',accepted:'已验收',rejected:'已拒绝',revision_requested:'要求调整',planning:'规划中',planned:'已规划','blocked: missing_config':'缺少配置'};const label=(x:string)=>labels[x]||x;const short=(x:string)=>x?x.slice(0,10):'—'
 async function load(){loading.value=true;error.value='';try{items.value=await listDeliveries();if(items.value.length)await select(selected.value?.snapshot.id||items.value[0].id);else selected.value=null}catch(e){error.value=e instanceof Error?e.message:'无法读取交付'}finally{loading.value=false}}
 async function select(id:number){try{selected.value=await getDelivery(id);comment.value='';validation.value='';decisionKey.value=crypto.randomUUID()}catch(e){error.value=e instanceof Error?e.message:'无法读取交付详情'}}

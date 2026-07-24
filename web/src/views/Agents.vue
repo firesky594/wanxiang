@@ -1,16 +1,5 @@
 <template>
   <section class="console">
-    <header class="topbar">
-      <RouterLink class="brand" to="/dashboard">
-        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <span>Wanxiang Agent</span>
-      </RouterLink>
-      <nav class="nav">
-        <RouterLink to="/dashboard"><el-icon><ArrowRight /></el-icon>调度台</RouterLink>
-        <RouterLink to="/agents"><el-icon><Connection /></el-icon>Agents</RouterLink>
-      </nav>
-    </header>
-
     <main class="main">
       <div class="page-head">
         <div>
@@ -62,8 +51,6 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { RouterLink } from 'vue-router'
-import { ArrowRight, Connection, Cpu } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { listAgentConfigs, probeAgent, saveAgentConfig, type AgentConfig, type ProviderType } from '../api/client'
 

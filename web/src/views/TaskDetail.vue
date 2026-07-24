@@ -1,15 +1,5 @@
 <template>
   <section class="console">
-    <header class="topbar">
-      <RouterLink class="brand" to="/dashboard">
-        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <span>Wanxiang Agent</span>
-      </RouterLink>
-      <nav class="nav">
-        <RouterLink to="/dashboard"><el-icon><ArrowRight /></el-icon>调度台</RouterLink>
-        <RouterLink to="/mrs"><el-icon><Share /></el-icon>MR</RouterLink>
-      </nav>
-    </header>
     <main class="main">
       <div class="page-head">
         <div>
@@ -123,8 +113,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { ArrowRight, Cpu, Share } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AgentOutputPanel from '../components/AgentOutputPanel.vue'
 import WorkflowGraph from '../components/WorkflowGraph.vue'

@@ -58,6 +58,7 @@ type WorkerInput struct {
 	AgentName    string `json:"agent_name"`
 	LeaseID      string `json:"lease_id"`
 	LeaseVersion int64  `json:"lease_version"`
+	ClaimToken   string `json:"claim_token,omitempty"`
 	ServerURL    string `json:"server_url"`
 	AgentToken   string `json:"agent_token"`
 }

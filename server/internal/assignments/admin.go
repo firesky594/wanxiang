@@ -40,7 +40,16 @@ func (s *Service) GetTaskMatch(ctx context.Context, taskID int64) (MatchView, er
 		return MatchView{}, sql.ErrNoRows
 	}
 	view := MatchView{TaskID: taskID, Decisions: []DecisionView{}, Assignments: []Assignment{}}
-	rows, err := s.db.QueryContext(ctx, `select md.id,md.step_id,coalesce(md.selected_agent,''),md.score,md.reasons_json,md.rejections_json,md.status from agent_match_decisions md join task_steps ts on ts.id=md.step_id where md.task_id=? and ts.plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?) order by md.id`, taskID, taskID)
+	rows, err := s.db.QueryContext(ctx, `select md.id,md.step_id,coalesce(md.selected_agent,''),md.score,md.reasons_json,md.rejections_json,md.status
+		from task_steps ts
+		join agent_match_decisions md on md.id=(
+				select max(latest.id)
+				from agent_match_decisions latest
+				where latest.task_id=ts.task_id and latest.step_id=ts.id
+			)
+		where ts.task_id=?
+			and ts.plan_version=(select coalesce(max(version),1) from task_plan_versions where task_id=?)
+		order by md.id`, taskID, taskID)
 	if err != nil {
 		return MatchView{}, err
 	}

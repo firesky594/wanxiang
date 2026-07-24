@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,6 +29,48 @@ type Service struct {
 }
 
 var agentNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+var agentRolePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+// ErrProviderUnavailable 标识 Agent Provider 探测失败，可由巡检器稍后重试。
+var ErrProviderUnavailable = errors.New("agent provider is unavailable")
+
+// ErrAgentConfigInvalid 标识 Agent 的本地运行配置无效，修复配置后可再次探测。
+var ErrAgentConfigInvalid = errors.New("agent runtime configuration is invalid")
+
+type providerUnavailableError struct {
+	err error
+}
+
+// Error 返回底层 Provider 不可用错误的脱敏描述。
+func (e *providerUnavailableError) Error() string {
+	return e.err.Error()
+}
+
+// Unwrap 同时暴露可分类错误与原始错误，供调用方判断降级状态。
+func (e *providerUnavailableError) Unwrap() []error {
+	return []error{ErrProviderUnavailable, e.err}
+}
+
+type agentConfigError struct {
+	err error
+}
+
+// Error 返回 Agent 运行配置错误的脱敏描述。
+func (e *agentConfigError) Error() string {
+	return e.err.Error()
+}
+
+// Unwrap 同时暴露配置分类错误与原始错误，供调用方判断阻塞原因。
+func (e *agentConfigError) Unwrap() []error {
+	return []error{ErrAgentConfigInvalid, e.err}
+}
+
+func invalidAgentConfig(err error) error {
+	if err == nil || errors.Is(err, ErrAgentConfigInvalid) {
+		return err
+	}
+	return &agentConfigError{err: err}
+}
 
 // NewService 创建 Agent 配置与运行服务。
 func NewService(cfg config.Config, db *sql.DB, buses ...*events.Bus) *Service {
@@ -40,38 +83,41 @@ func NewService(cfg config.Config, db *sql.DB, buses ...*events.Bus) *Service {
 
 // EnsureManager 初始化 Manager 目录并同步注册状态。
 func (s *Service) EnsureManager(ctx context.Context) (ManagerStatus, error) {
-	dir := filepath.Join(s.cfg.AgentDir, "manager")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := s.ensureAgentDirectory("manager")
+	if err != nil {
 		return ManagerStatus{}, err
 	}
-	files := map[string]string{
+	templates := map[string]string{
 		".gitignore":       "env\nlogs/runtime/*.log\n",
 		"env.example":      "AGENT_PROVIDER_TYPE=openai\nAGENT_API_KEY=\nAGENT_BASE_URL=https://api.openai.com/v1\nAGENT_MODEL=\n",
 		"system_prompt.md": "# Manager Agent\n\nYou plan tasks, manage agents, and enforce human blocking issues.\n",
 		"agent.yaml":       managerYAML(),
 	}
-	for name, content := range files {
-		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-				return ManagerStatus{}, err
-			}
-		}
-	}
-	for _, sub := range []string{"skills", "mcps", "memory/summaries", "memory/decisions", "memory/task-notes", "logs/runtime", "logs/conversations"} {
-		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+	for name, content := range templates {
+		if err := writeAgentFileOnce(dir, name, content, 0o644); err != nil {
 			return ManagerStatus{}, err
 		}
 	}
-	missing := missingAgentConfig(filepath.Join(dir, "env"))
+	for _, sub := range []string{"skills", "mcps", "memory/summaries", "memory/decisions", "memory/task-notes", "logs/runtime", "logs/conversations"} {
+		if err := ensureAgentSubdirectory(dir, sub); err != nil {
+			return ManagerStatus{}, err
+		}
+	}
+	values, err := readAgentEnv(dir)
+	if err != nil {
+		return ManagerStatus{}, err
+	}
+	missing := missingAgentConfig(values)
 	status := "online"
 	if len(missing) > 0 {
 		status = "blocked: missing_secret"
 	} else {
 		status = "configured"
-		_ = s.db.QueryRowContext(ctx, `select status from agent_registry where name='manager'`).Scan(&status)
+		if queryErr := s.db.QueryRowContext(ctx, `select status from agent_registry where name='manager'`).Scan(&status); queryErr != nil && !errors.Is(queryErr, sql.ErrNoRows) {
+			return ManagerStatus{}, queryErr
+		}
 	}
-	_, err := s.db.ExecContext(ctx, `insert into agent_registry(name, role, dir, status, last_heartbeat) values('manager','manager',?,?,datetime('now'))
+	_, err = s.db.ExecContext(ctx, `insert into agent_registry(name, role, dir, status, last_heartbeat) values('manager','manager',?,?,datetime('now'))
 		on conflict(name) do update set status=excluded.status, dir=excluded.dir, last_heartbeat=datetime('now')`, dir, status)
 	if err != nil {
 		return ManagerStatus{}, err
@@ -90,12 +136,14 @@ func (s *Service) ManagerReady(ctx context.Context) (bool, error) {
 
 // SaveManagerSecret 安全写入 Manager 环境密钥。
 func (s *Service) SaveManagerSecret(ctx context.Context, key, value string) error {
-	dir := filepath.Join(s.cfg.AgentDir, "manager")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := s.ensureAgentDirectory("manager")
+	if err != nil {
 		return err
 	}
-	envPath := filepath.Join(dir, "env")
-	values := readEnv(envPath)
+	values, err := readAgentEnv(dir)
+	if err != nil {
+		return err
+	}
 	values[key] = value
 	keys := make([]string, 0, len(values))
 	for envKey := range values {
@@ -106,7 +154,7 @@ func (s *Service) SaveManagerSecret(ctx context.Context, key, value string) erro
 	for _, envKey := range keys {
 		content.WriteString(envKey + "=" + values[envKey] + "\n")
 	}
-	return os.WriteFile(envPath, []byte(content.String()), 0o600)
+	return writeAgentFile(dir, "env", content.String(), 0o600)
 }
 
 // SaveAgentConfig 校验并持久化 Agent 运行配置。
@@ -135,14 +183,14 @@ func (s *Service) SaveAgentConfig(ctx context.Context, input AgentConfigInput) (
 			return AgentConfigView{}, errors.New("configuration values cannot contain newlines")
 		}
 	}
-	dir, err := s.agentBase(input.Name)
+	dir, err := s.ensureAgentDirectory(input.Name)
 	if err != nil {
 		return AgentConfigView{}, err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	existing, err := readAgentEnv(dir)
+	if err != nil {
 		return AgentConfigView{}, err
 	}
-	existing := readEnv(filepath.Join(dir, "env"))
 	apiKey := strings.TrimSpace(input.APIKey)
 	if apiKey == "" {
 		apiKey = existing["AGENT_API_KEY"]
@@ -154,16 +202,10 @@ func (s *Service) SaveAgentConfig(ctx context.Context, input AgentConfigInput) (
 		return AgentConfigView{}, errors.New("api_key is required for a new agent configuration")
 	}
 	content := fmt.Sprintf("AGENT_PROVIDER_TYPE=%s\nAGENT_API_KEY=%s\nAGENT_BASE_URL=%s\nAGENT_MODEL=%s\n", input.ProviderType, apiKey, input.BaseURL, input.Model)
-	if err := os.WriteFile(filepath.Join(dir, "env"), []byte(content), 0o600); err != nil {
+	if err := writeAgentFile(dir, "env", content, 0o600); err != nil {
 		return AgentConfigView{}, err
 	}
-	if err := os.Chmod(filepath.Join(dir, "env"), 0o600); err != nil {
-		return AgentConfigView{}, err
-	}
-	role := "agent"
-	if input.Name == "manager" {
-		role = "manager"
-	}
+	role := s.agentRole(ctx, input.Name, dir)
 	_, err = s.db.ExecContext(ctx, `insert into agent_registry(name,role,dir,status,last_heartbeat,current_model) values(?,?,?,'configured',datetime('now'),?)
 		on conflict(name) do update set role=excluded.role,dir=excluded.dir,status=excluded.status,last_heartbeat=excluded.last_heartbeat,current_model=excluded.current_model`, input.Name, role, dir, input.Model)
 	if err != nil {
@@ -180,10 +222,17 @@ func (s *Service) GetAgentConfig(ctx context.Context, name string) (AgentConfigV
 
 // ListAgentConfigs 列出全部 Agent 的脱敏配置与状态。
 func (s *Service) ListAgentConfigs(ctx context.Context) ([]AgentConfigView, error) {
-	entries, err := os.ReadDir(s.cfg.AgentDir)
+	info, err := os.Lstat(s.cfg.AgentDir)
 	if os.IsNotExist(err) {
 		return []AgentConfigView{}, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("agent root is not a safe directory")
+	}
+	entries, err := os.ReadDir(s.cfg.AgentDir)
 	if err != nil {
 		return nil, err
 	}
@@ -194,13 +243,33 @@ func (s *Service) ListAgentConfigs(ctx context.Context) ([]AgentConfigView, erro
 		}
 		view, err := s.GetAgentConfig(ctx, entry.Name())
 		if err != nil {
-			values := readEnv(filepath.Join(s.cfg.AgentDir, entry.Name(), "env"))
+			if !errors.Is(err, ErrAgentConfigInvalid) {
+				return nil, err
+			}
+			dir, pathErr := s.agentBase(entry.Name())
+			if pathErr != nil {
+				return nil, pathErr
+			}
+			values, pathErr := readAgentEnv(dir)
+			if pathErr != nil {
+				if !errors.Is(pathErr, ErrAgentConfigInvalid) {
+					return nil, pathErr
+				}
+				if markErr := s.markUnavailable(ctx, entry.Name(), "blocked: missing_config"); markErr != nil {
+					return nil, markErr
+				}
+				views = append(views, AgentConfigView{Name: entry.Name(), Status: "blocked: missing_config"})
+				continue
+			}
 			providerType := strings.ToLower(values["AGENT_PROVIDER_TYPE"])
 			baseURL := values["AGENT_BASE_URL"]
 			if baseURL == "" {
 				baseURL = providers.DefaultBaseURL(providerType)
 			}
 			view = AgentConfigView{Name: entry.Name(), ProviderType: providerType, BaseURL: baseURL, Model: values["AGENT_MODEL"], SecretConfigured: values["AGENT_API_KEY"] != "" || (entry.Name() == "manager" && values["MANAGER_API_KEY"] != ""), Status: "blocked: missing_config"}
+			if markErr := s.markUnavailable(ctx, entry.Name(), "blocked: missing_config"); markErr != nil {
+				return nil, markErr
+			}
 		}
 		views = append(views, view)
 	}
@@ -212,7 +281,13 @@ func (s *Service) ListAgentConfigs(ctx context.Context) ([]AgentConfigView, erro
 func (s *Service) ProbeAgent(ctx context.Context, name string) (AgentConfigView, error) {
 	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
 	if err != nil {
-		return AgentConfigView{}, err
+		view := AgentConfigView{Name: name, Status: "blocked: missing_config"}
+		if errors.Is(err, ErrAgentConfigInvalid) {
+			if markErr := s.markUnavailable(ctx, name, view.Status); markErr != nil {
+				return view, errors.Join(err, fmt.Errorf("mark agent configuration unavailable: %w", markErr))
+			}
+		}
+		return view, err
 	}
 	provider, err := s.providerRegistry.Get(runtimeCfg.ProviderType)
 	if err == nil {
@@ -224,19 +299,19 @@ func (s *Service) ProbeAgent(ctx context.Context, name string) (AgentConfigView,
 		status = "blocked: provider_error"
 		lastError = err.Error()
 	}
-	role := "agent"
-	if name == "manager" {
-		role = "manager"
-	}
 	dir, _ := s.agentBase(name)
+	role := s.agentRole(ctx, name, dir)
 	_, dbErr := s.db.ExecContext(ctx, `insert into agent_registry(name,role,dir,status,last_heartbeat,current_model) values(?,?,?,?,datetime('now'),?)
-		on conflict(name) do update set status=excluded.status,last_heartbeat=excluded.last_heartbeat,current_model=excluded.current_model`, name, role, dir, status, runtimeCfg.Model)
+		on conflict(name) do update set role=excluded.role,status=excluded.status,last_heartbeat=excluded.last_heartbeat,current_model=excluded.current_model`, name, role, dir, status, runtimeCfg.Model)
 	if dbErr != nil {
 		return AgentConfigView{}, dbErr
 	}
 	view := runtimeCfg.AgentConfigView
 	view.Status = status
 	view.LastError = lastError
+	if err != nil {
+		return view, &providerUnavailableError{err: err}
+	}
 	return view, err
 }
 
@@ -244,13 +319,27 @@ func (s *Service) ProbeAgent(ctx context.Context, name string) (AgentConfigView,
 func (s *Service) ChatAgent(ctx context.Context, name string, messages []providers.Message, maxTokens int) (providers.Result, error) {
 	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
 	if err != nil {
+		if errors.Is(err, ErrAgentConfigInvalid) {
+			if markErr := s.markUnavailable(ctx, name, "blocked: missing_config"); markErr != nil {
+				return providers.Result{}, errors.Join(err, fmt.Errorf("mark agent configuration unavailable: %w", markErr))
+			}
+		}
 		return providers.Result{}, err
 	}
 	provider, err := s.providerRegistry.Get(runtimeCfg.ProviderType)
 	if err != nil {
+		if markErr := s.markUnavailable(ctx, name, "blocked: missing_config"); markErr != nil {
+			return providers.Result{}, errors.Join(err, fmt.Errorf("mark agent configuration unavailable: %w", markErr))
+		}
 		return providers.Result{}, err
 	}
-	return provider.Chat(ctx, providers.Config{APIKey: runtimeCfg.APIKey, BaseURL: runtimeCfg.BaseURL, Model: runtimeCfg.Model}, messages, maxTokens)
+	result, err := provider.Chat(ctx, providers.Config{APIKey: runtimeCfg.APIKey, BaseURL: runtimeCfg.BaseURL, Model: runtimeCfg.Model}, messages, maxTokens)
+	if err != nil {
+		if markErr := s.markUnavailable(ctx, name, "blocked: provider_error"); markErr != nil {
+			return providers.Result{}, errors.Join(err, fmt.Errorf("mark agent provider unavailable: %w", markErr))
+		}
+	}
+	return result, err
 }
 
 func (s *Service) loadRuntimeConfig(ctx context.Context, name string) (runtimeConfig, error) {
@@ -258,7 +347,10 @@ func (s *Service) loadRuntimeConfig(ctx context.Context, name string) (runtimeCo
 	if err != nil {
 		return runtimeConfig{}, err
 	}
-	values := readEnv(filepath.Join(dir, "env"))
+	values, err := readAgentEnv(dir)
+	if err != nil {
+		return runtimeConfig{}, err
+	}
 	providerType := strings.ToLower(strings.TrimSpace(values["AGENT_PROVIDER_TYPE"]))
 	apiKey := strings.TrimSpace(values["AGENT_API_KEY"])
 	if apiKey == "" && name == "manager" {
@@ -270,13 +362,19 @@ func (s *Service) loadRuntimeConfig(ctx context.Context, name string) (runtimeCo
 	}
 	model := strings.TrimSpace(values["AGENT_MODEL"])
 	if providerType == "" || apiKey == "" || model == "" {
-		return runtimeConfig{}, errors.New("agent provider_type, api_key, and model are required")
+		return runtimeConfig{}, invalidAgentConfig(errors.New("agent provider_type, api_key, and model are required"))
 	}
 	if _, err := s.providerRegistry.Get(providerType); err != nil {
-		return runtimeConfig{}, err
+		return runtimeConfig{}, invalidAgentConfig(err)
+	}
+	parsedBaseURL, parseErr := url.Parse(baseURL)
+	if parseErr != nil || (parsedBaseURL.Scheme != "http" && parsedBaseURL.Scheme != "https") || parsedBaseURL.Host == "" {
+		return runtimeConfig{}, invalidAgentConfig(errors.New("agent base_url must be an absolute HTTP or HTTPS URL"))
 	}
 	status := "configured"
-	_ = s.db.QueryRowContext(ctx, `select status from agent_registry where name=?`, name).Scan(&status)
+	if err := s.db.QueryRowContext(ctx, `select status from agent_registry where name=?`, name).Scan(&status); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return runtimeConfig{}, err
+	}
 	if status == "blocked: missing_config" {
 		if _, err := s.db.ExecContext(ctx, `update agent_registry set status='configured',current_model=? where name=? and status='blocked: missing_config'`, model, name); err != nil {
 			return runtimeConfig{}, err
@@ -314,6 +412,67 @@ func (s *Service) Heartbeat(ctx context.Context, input HeartbeatInput) error {
 	return s.bus.PublishJSON(ctx, input.CurrentTaskID, "agent.heartbeat", input.Name, map[string]any{
 		"name": input.Name, "role": input.Role, "status": input.Status, "current_task_id": input.CurrentTaskID, "current_model": input.CurrentModel,
 	})
+}
+
+func (s *Service) keepAlive(ctx context.Context, name, role, status string) error {
+	if name == "" || role == "" || status == "" {
+		return errors.New("name, role, and status are required")
+	}
+	if name == "manager" {
+		ready, err := s.ManagerReady(ctx)
+		if err != nil {
+			return err
+		}
+		if !ready {
+			return errors.New("manager is blocked: MANAGER_API_KEY is missing")
+		}
+		role = "manager"
+	}
+	dir, err := s.agentBase(name)
+	if err != nil {
+		return err
+	}
+	runtimeCfg, err := s.loadRuntimeConfig(ctx, name)
+	if err != nil {
+		if markErr := s.markMissingConfig(ctx, name, role, dir); markErr != nil {
+			return errors.Join(err, fmt.Errorf("mark agent missing config: %w", markErr))
+		}
+		return err
+	}
+	if runtimeCfg.Status != "online" {
+		return fmt.Errorf("agent %s must be probed online before keepalive", name)
+	}
+	_, err = s.db.ExecContext(ctx, `insert into agent_registry(name,role,dir,status,last_heartbeat) values(?,?,?,?,datetime('now'))
+		on conflict(name) do update set role=excluded.role,status=excluded.status,last_heartbeat=datetime('now')`,
+		name, role, dir, status)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) markMissingConfig(ctx context.Context, name, role, dir string) error {
+	_, err := s.db.ExecContext(ctx, `insert into agent_registry(name,role,dir,status,last_heartbeat)
+		values(?,?,?,'blocked: missing_config',datetime('now'))
+		on conflict(name) do update set role=excluded.role,dir=excluded.dir,status=excluded.status,last_heartbeat=excluded.last_heartbeat`,
+		name, role, dir)
+	return err
+}
+
+func (s *Service) markUnavailable(ctx context.Context, name, status string) error {
+	if status != "blocked: missing_config" && status != "blocked: provider_error" {
+		return errors.New("invalid unavailable status")
+	}
+	dir, err := s.agentBase(name)
+	if err != nil {
+		return err
+	}
+	role := s.agentRole(ctx, name, dir)
+	_, err = s.db.ExecContext(ctx, `insert into agent_registry(name,role,dir,status,last_heartbeat)
+		values(?,?,?,?,datetime('now'))
+		on conflict(name) do update set role=excluded.role,dir=excluded.dir,status=excluded.status,last_heartbeat=excluded.last_heartbeat`,
+		name, role, dir, status)
+	return err
 }
 
 // RecordTokenUsage 记录 Agent 模型用量并发布事件。
@@ -369,43 +528,198 @@ func (s *Service) agentBase(agentName string) (string, error) {
 	return files.UnderRoot(s.cfg.AgentDir, filepath.Join(s.cfg.AgentDir, agentName))
 }
 
+func (s *Service) ensureAgentDirectory(agentName string) (string, error) {
+	dir, err := s.agentBase(agentName)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	safe, err := files.UnderRoot(s.cfg.AgentDir, dir)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(safe)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("agent path is not a safe directory")
+	}
+	return safe, nil
+}
+
+func (s *Service) agentRole(ctx context.Context, name, dir string) string {
+	if name == "manager" {
+		return "manager"
+	}
+	path := filepath.Join(dir, "agent.yaml")
+	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && info.Size() <= 64*1024 {
+		if content, readErr := os.ReadFile(path); readErr == nil {
+			for _, line := range strings.Split(string(content), "\n") {
+				if len(line) != len(strings.TrimLeft(line, " \t")) {
+					continue
+				}
+				parts := strings.SplitN(strings.TrimSpace(line), ":", 2)
+				if len(parts) != 2 || strings.TrimSpace(parts[0]) != "role" {
+					continue
+				}
+				role := strings.TrimSpace(parts[1])
+				if agentRolePattern.MatchString(role) {
+					return role
+				}
+				break
+			}
+		}
+	}
+	var role string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(ctx, `select role from agent_registry where name=?`, name).Scan(&role)
+	}
+	if agentRolePattern.MatchString(role) {
+		return role
+	}
+	return "agent"
+}
+
 func writeAgentFile(base, relPath, content string, perm os.FileMode) error {
 	target := filepath.Join(base, relPath)
 	safe, err := files.UnderRoot(base, target)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(safe), 0o755); err != nil {
+	parent := filepath.Dir(safe)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(safe, []byte(content), perm)
-}
-
-func missingEnv(path string, keys []string) []string {
-	content, err := os.ReadFile(path)
-	values := map[string]bool{}
-	if err == nil {
-		for _, line := range strings.Split(string(content), "\n") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
-				values[strings.TrimSpace(parts[0])] = true
-			}
-		}
-	}
-	var missing []string
-	for _, key := range keys {
-		if !values[key] {
-			missing = append(missing, key)
-		}
-	}
-	return missing
-}
-
-func readEnv(path string) map[string]string {
-	values := map[string]string{}
-	content, err := os.ReadFile(path)
+	safe, err = files.UnderRoot(base, safe)
 	if err != nil {
-		return values
+		return err
+	}
+	if err := requireSafeDirectory(filepath.Dir(safe)); err != nil {
+		return err
+	}
+	if info, statErr := os.Lstat(safe); statErr == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("target is not a safe regular file")
+		}
+	} else if !os.IsNotExist(statErr) {
+		return statErr
+	}
+	return atomicWriteFile(safe, content, perm)
+}
+
+func writeAgentFileOnce(base, relPath, content string, perm os.FileMode) error {
+	target, err := files.UnderRoot(base, filepath.Join(base, relPath))
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(target)
+	if err == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("existing path is not a safe regular file")
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	return writeAgentFile(base, relPath, content, perm)
+}
+
+func ensureAgentSubdirectory(base, relPath string) error {
+	target, err := files.UnderRoot(base, filepath.Join(base, relPath))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return err
+	}
+	target, err = files.UnderRoot(base, target)
+	if err != nil {
+		return err
+	}
+	return requireSafeDirectory(target)
+}
+
+func requireSafeDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("path is not a safe directory")
+	}
+	return nil
+}
+
+func atomicWriteFile(path, content string, perm os.FileMode) error {
+	parent := filepath.Dir(path)
+	file, err := os.CreateTemp(parent, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := file.Name()
+	defer os.Remove(tempPath)
+	if err = file.Chmod(perm); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err = file.WriteString(content); err != nil {
+		file.Close()
+		return err
+	}
+	if err = file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	return nil
+}
+
+func readAgentEnv(dir string) (map[string]string, error) {
+	values := map[string]string{}
+	path, err := files.UnderRoot(dir, filepath.Join(dir, "env"))
+	if err != nil {
+		return nil, invalidAgentConfig(err)
+	}
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return values, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, invalidAgentConfig(errors.New("agent env is not a safe regular file"))
+	}
+	if info.Size() > 1024*1024 {
+		return nil, invalidAgentConfig(errors.New("agent env is too large"))
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return nil, invalidAgentConfig(errors.New("agent env changed during secure read"))
+	}
+	content, err := io.ReadAll(io.LimitReader(file, 1024*1024+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > 1024*1024 {
+		return nil, invalidAgentConfig(errors.New("agent env is too large"))
 	}
 	for _, line := range strings.Split(string(content), "\n") {
 		line = strings.TrimSpace(line)
@@ -413,15 +727,15 @@ func readEnv(path string) map[string]string {
 			continue
 		}
 		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			values[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+			return nil, invalidAgentConfig(errors.New("agent env contains an invalid line"))
 		}
+		values[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 	}
-	return values
+	return values, nil
 }
 
-func missingAgentConfig(path string) []string {
-	values := readEnv(path)
+func missingAgentConfig(values map[string]string) []string {
 	missing := []string{}
 	if values["AGENT_PROVIDER_TYPE"] == "" {
 		missing = append(missing, "AGENT_PROVIDER_TYPE")

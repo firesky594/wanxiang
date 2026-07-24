@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"wanxiang-agent/server/internal/config"
@@ -16,6 +17,19 @@ import (
 
 type AgentChatter interface {
 	ChatAgent(context.Context, string, []providers.Message, int) (providers.Result, error)
+}
+
+const (
+	planningErrorTransient     = "transient"
+	planningErrorConfiguration = "configuration"
+	maxPlanningAttempts        = 4
+	planningClaimTimeout       = 5 * time.Minute
+)
+
+var planningRetryDelays = [...]time.Duration{
+	5 * time.Second,
+	30 * time.Second,
+	2 * time.Minute,
 }
 
 type Service struct {
@@ -38,39 +52,37 @@ func (s *Service) PlanTask(ctx context.Context, taskID int64) (Plan, error) {
 	if task.Status == "planned" {
 		return s.loadPersisted(ctx, taskID)
 	}
-	if task.Status != "created" {
+	if task.Status != "created" && task.Status != "blocked: planning_error" {
 		return Plan{}, fmt.Errorf("task status %q cannot be planned", task.Status)
 	}
-	res, err := s.db.ExecContext(ctx, `update tasks set status='planning' where id=? and status='created'`, taskID)
+	managerDir := filepath.Join(s.cfg.AgentDir, "manager")
+	conditionHash := planningConditionFingerprint(managerDir)
+	attempt, err := s.claimInitialPlan(ctx, taskID, conditionHash)
 	if err != nil {
 		return Plan{}, err
 	}
-	changed, _ := res.RowsAffected()
-	if changed != 1 {
-		return Plan{}, errors.New("task planning was claimed concurrently")
-	}
-	startedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	startedPayload, _ := json.Marshal(map[string]any{"task_id": taskID})
-	if _, err := s.db.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,'task.planning.started','manager',?,?)`, taskID, string(startedPayload), startedAt); err != nil {
-		return Plan{}, s.block(ctx, taskID, "planning failed: could not record start", err)
-	}
-	messages, err := BuildMessages(filepath.Join(s.cfg.AgentDir, "manager"), task)
+	task.Status = "planning"
+	messages, err := BuildMessages(managerDir, task)
 	if err != nil {
-		return Plan{}, s.block(ctx, taskID, "planning failed: manager prompt unavailable", err)
+		return Plan{}, s.block(ctx, taskID, attempt, planningErrorConfiguration, "planning failed: manager prompt unavailable", err)
 	}
 	if s.chatter == nil {
-		return Plan{}, s.block(ctx, taskID, "planning failed: manager provider unavailable", errors.New("manager chatter is unavailable"))
+		return Plan{}, s.block(ctx, taskID, attempt, planningErrorConfiguration, "planning failed: manager provider unavailable", errors.New("manager chatter is unavailable"))
 	}
 	result, err := s.chatter.ChatAgent(ctx, "manager", messages, 4000)
 	if err != nil {
-		return Plan{}, s.block(ctx, taskID, "planning failed: provider request failed", err)
+		class := planningErrorTransient
+		if isPlanningConfigurationError(err) {
+			class = planningErrorConfiguration
+		}
+		return Plan{}, s.block(ctx, taskID, attempt, class, "planning failed: provider request failed", err)
 	}
 	plan, err := ParsePlan([]byte(result.Content))
 	if err != nil {
-		return Plan{}, s.block(ctx, taskID, "planning failed: invalid structured response", err)
+		return Plan{}, s.block(ctx, taskID, attempt, planningErrorTransient, "planning failed: invalid structured response", err)
 	}
 	if err := s.persist(ctx, taskID, 1, "planning", plan); err != nil {
-		return Plan{}, err
+		return Plan{}, s.block(ctx, taskID, attempt, planningErrorTransient, "planning failed: could not persist plan", err)
 	}
 	return plan, nil
 }
@@ -120,6 +132,51 @@ func (s *Service) loadTask(ctx context.Context, id int64) (tasks.Task, error) {
 	return item, err
 }
 
+func (s *Service) claimInitialPlan(ctx context.Context, taskID int64, conditionHash string) (int, error) {
+	now := time.Now().UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `update tasks
+		set status='planning',
+			planning_attempts=planning_attempts+1,
+			planning_error_class='',
+			planning_next_retry_at=null,
+			planning_started_at=?,
+			planning_condition_hash=?
+		where id=? and (
+			status='created'
+			or (
+				status='blocked: planning_error'
+				and planning_error_class=?
+				and planning_attempts<?
+				and planning_next_retry_at is not null
+				and planning_next_retry_at<=?
+			)
+		)`, now.Format(time.RFC3339Nano), conditionHash, taskID, planningErrorTransient, maxPlanningAttempts, now.Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, err
+	}
+	changed, _ := res.RowsAffected()
+	if changed != 1 {
+		return 0, errors.New("task planning is not eligible yet or was claimed concurrently")
+	}
+	var attempt int
+	if err := tx.QueryRowContext(ctx, `select planning_attempts from tasks where id=?`, taskID).Scan(&attempt); err != nil {
+		return 0, err
+	}
+	payload, _ := json.Marshal(map[string]any{"task_id": taskID, "attempt": attempt})
+	if _, err := tx.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,'task.planning.started','manager',?,?)`, taskID, string(payload), now.Format(time.RFC3339Nano)); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return attempt, nil
+}
+
 func (s *Service) persist(ctx context.Context, taskID, version int64, expectedStatus string, plan Plan) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -153,7 +210,7 @@ func (s *Service) persist(ctx context.Context, taskID, version int64, expectedSt
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `update tasks set status='planned',manager_summary=? where id=? and status='planning'`, plan.Summary, taskID); err != nil {
+	if _, err := tx.ExecContext(ctx, `update tasks set status='planned',manager_summary=?,planning_error_class='',planning_next_retry_at=null,planning_started_at=null,planning_condition_hash='' where id=? and status='planning'`, plan.Summary, taskID); err != nil {
 		if expectedStatus == "planning" {
 			return err
 		}
@@ -171,6 +228,10 @@ func (s *Service) persist(ctx context.Context, taskID, version int64, expectedSt
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Service) planningCondition() string {
+	return planningConditionFingerprint(filepath.Join(s.cfg.AgentDir, "manager"))
 }
 
 func (s *Service) loadPersisted(ctx context.Context, taskID int64) (Plan, error) {
@@ -197,9 +258,75 @@ func (s *Service) loadPersisted(ctx context.Context, taskID int64) (Plan, error)
 	return plan, rows.Err()
 }
 
-func (s *Service) block(ctx context.Context, taskID int64, summary string, cause error) error {
-	_, _ = s.db.ExecContext(ctx, `update tasks set status='blocked: planning_error',manager_summary=? where id=? and status='planning'`, summary, taskID)
-	payload, _ := json.Marshal(map[string]any{"task_id": taskID, "reason": summary})
-	_, _ = s.db.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,'task.planning.blocked','manager',?,?)`, taskID, string(payload), time.Now().UTC().Format(time.RFC3339Nano))
+func (s *Service) block(ctx context.Context, taskID int64, attempt int, class, summary string, cause error) error {
+	now := time.Now().UTC()
+	var retryAt any
+	retryValue := ""
+	if class == planningErrorTransient {
+		retryValue = planningRetryTime(now, attempt)
+		if retryValue != "" {
+			retryAt = retryValue
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("%s: %w", summary, cause)
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `update tasks
+		set status='blocked: planning_error',
+			manager_summary=?,
+			planning_error_class=?,
+			planning_next_retry_at=?,
+			planning_started_at=null
+		where id=? and status='planning'`, summary, class, retryAt, taskID)
+	if err != nil {
+		return fmt.Errorf("%s: %w", summary, cause)
+	}
+	changed, _ := res.RowsAffected()
+	if changed != 1 {
+		return fmt.Errorf("%s: %w", summary, cause)
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"task_id": taskID, "reason": summary, "error_class": class,
+		"attempt": attempt, "next_retry_at": retryValue,
+	})
+	if _, err := tx.ExecContext(ctx, `insert into runtime_events(task_id,event_type,actor,payload_json,created_at) values(?,'task.planning.blocked','manager',?,?)`, taskID, string(payload), now.Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("%s: %w", summary, cause)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%s: %w", summary, cause)
+	}
 	return fmt.Errorf("%s: %w", summary, cause)
+}
+
+func planningRetryTime(now time.Time, attempt int) string {
+	if attempt >= maxPlanningAttempts {
+		return ""
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	delayIndex := attempt - 1
+	if delayIndex >= len(planningRetryDelays) {
+		delayIndex = len(planningRetryDelays) - 1
+	}
+	return now.Add(planningRetryDelays[delayIndex]).Format(time.RFC3339Nano)
+}
+
+func isPlanningConfigurationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	value := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"missing_config", "missing secret", "api_key", "api key", "provider_type",
+		"provider type", "model is required", "model are required", "unsupported provider",
+		"401", "403", "unauthorized", "forbidden", "authentication",
+	} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
 }

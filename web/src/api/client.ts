@@ -119,10 +119,16 @@ export interface TaskDetail {
   edges: WorkflowEdge[]
 }
 
-/** 创建后台任务，可选择复用已有项目。 */
-export async function createAdminTask(title: string, description: string, projectID?: number): Promise<Task> {
-  const body: { title: string; description: string; project_id?: number } = { title, description }
+/** 携带稳定幂等键创建后台任务，可选择复用已有项目。 */
+export async function createAdminTask(
+  title: string,
+  description: string,
+  projectID?: number,
+  idempotencyKey?: string
+): Promise<Task> {
+  const body: { title: string; description: string; project_id?: number; idempotency_key?: string } = { title, description }
   if (projectID !== undefined) body.project_id = projectID
+  if (idempotencyKey) body.idempotency_key = idempotencyKey
   const response = await api<{ ok: boolean; task: Task }>('/api/admin/tasks', { method: 'POST', body: JSON.stringify(body) })
   return response.task
 }

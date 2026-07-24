@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"wanxiang-agent/server/internal/leases"
@@ -53,35 +54,45 @@ func RunWorker(parent context.Context, input io.Reader, output io.Writer, runner
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 	ref := leases.LeaseRef{TaskID: workerInput.TaskID, StepID: workerInput.StepID, AgentName: workerInput.AgentName, LeaseID: workerInput.LeaseID, LeaseVersion: workerInput.LeaseVersion}
+	finishInterrupted := func(cause error, outcome runOutcome) error {
+		if outcome.err == nil && outcome.result.Status == RunCompleted {
+			_ = json.NewEncoder(output).Encode(outcome.result)
+			return nil
+		}
+		var checkpointErr error
+		if checkpoint != nil && outcome.result.Status != RunCheckpointed {
+			checkpointCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+			_, checkpointErr = checkpoint.CreateGitCheckpoint(checkpointCtx, ref, WorkerSummary{Completed: []string{"收到关闭或心跳中断信号，保存当前上下文"}, NextAction: "等待租约恢复后继续"})
+			stop()
+			if errors.Is(checkpointErr, errNoControlledChanges) {
+				checkpointErr = nil
+			}
+		}
+		outcome.result.Status = RunInterrupted
+		_ = json.NewEncoder(output).Encode(outcome.result)
+		if checkpointErr != nil {
+			return errors.Join(cause, fmt.Errorf("shutdown checkpoint failed: %w", checkpointErr))
+		}
+		return cause
+	}
 	for {
 		select {
 		case outcome := <-done:
+			if parent.Err() != nil {
+				return finishInterrupted(parent.Err(), outcome)
+			}
 			_ = json.NewEncoder(output).Encode(outcome.result)
 			return outcome.err
 		case <-parent.Done():
 			cancel()
 			outcome := <-done
-			if checkpoint != nil {
-				checkpointCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
-				_, _ = checkpoint.CreateGitCheckpoint(checkpointCtx, ref, WorkerSummary{Completed: []string{"收到关闭信号，保存当前上下文"}, NextAction: "等待租约恢复后继续"})
-				stop()
-			}
-			outcome.result.Status = RunInterrupted
-			_ = json.NewEncoder(output).Encode(outcome.result)
-			return parent.Err()
+			return finishInterrupted(parent.Err(), outcome)
 		case <-ticker.C:
 			if heartbeater != nil {
 				if _, err := heartbeater.Heartbeat(ctx, ref); err != nil {
 					cancel()
 					outcome := <-done
-					if checkpoint != nil {
-						checkpointCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
-						_, _ = checkpoint.CreateGitCheckpoint(checkpointCtx, ref, WorkerSummary{Completed: []string{"租约心跳中断，保存当前上下文"}, NextAction: "等待租约恢复后继续"})
-						stop()
-					}
-					outcome.result.Status = RunInterrupted
-					_ = json.NewEncoder(output).Encode(outcome.result)
-					return err
+					return finishInterrupted(err, outcome)
 				}
 			}
 		}
@@ -92,6 +103,7 @@ func RunWorker(parent context.Context, input io.Reader, output io.Writer, runner
 func NewWorkerCommand(binary string, input *os.File, agentEnv map[string]string) *exec.Cmd {
 	cmd := exec.Command(binary, "agent-worker", "--input-fd", "3")
 	cmd.ExtraFiles = []*os.File{input}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "TMPDIR=" + os.Getenv("TMPDIR")}
 	keys := make([]string, 0, len(agentEnv))
 	for key := range agentEnv {

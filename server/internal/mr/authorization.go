@@ -26,11 +26,13 @@ func (s *Service) authorizeSubmission(ctx context.Context, principal Principal, 
 	var leaseVersion, projectID int64
 	err := s.db.QueryRowContext(ctx, `select ta.agent_name,l.lease_id,l.lease_version,l.status,l.expires_at,pw.project_id,pw.branch_name,pw.worktree_path,coalesce(cp.git_commit,''),coalesce(cp.branch_name,''),coalesce(td.project_lead,'')
 		from task_assignments ta
-		join task_step_leases l on l.task_id=ta.task_id and l.step_id=ta.step_id and l.agent_name=ta.agent_name
+		join task_steps current on current.task_id=ta.task_id and current.id=ta.step_id and current.agent_name=ta.agent_name
+		join task_step_leases l on l.lease_id=current.lease_id and l.lease_version=current.lease_version and l.agent_name=ta.agent_name
 		join project_workspaces pw on pw.task_id=ta.task_id and pw.step_id=ta.step_id and pw.agent_name=ta.agent_name
 		left join task_checkpoints cp on cp.id=(select id from task_checkpoints where task_id=ta.task_id and step_id=ta.step_id and lease_id=l.lease_id order by id desc limit 1)
 		left join team_decisions td on td.task_id=ta.task_id and td.plan_version=(select plan_version from task_steps where id=ta.step_id)
-		where ta.task_id=? and ta.step_id=?`, input.TaskID, input.StepID).Scan(&owner, &leaseID, &leaseVersion, &leaseStatus, &expiresAt, &projectID, &branch, &worktree, &checkpointCommit, &checkpointBranch, &projectLead)
+		where ta.task_id=? and ta.step_id=?`, input.TaskID, input.StepID).
+		Scan(&owner, &leaseID, &leaseVersion, &leaseStatus, &expiresAt, &projectID, &branch, &worktree, &checkpointCommit, &checkpointBranch, &projectLead)
 	if errors.Is(err, sql.ErrNoRows) || owner != principal.Name {
 		return submissionContext{}, ErrIdentityMismatch
 	}
@@ -38,7 +40,8 @@ func (s *Service) authorizeSubmission(ctx context.Context, principal Principal, 
 		return submissionContext{}, err
 	}
 	expires, parseErr := time.Parse(time.RFC3339Nano, expiresAt)
-	if leaseID != input.LeaseID || leaseVersion != input.LeaseVersion || leaseStatus != "active" || parseErr != nil || !time.Now().UTC().Before(expires) {
+	active := leaseStatus == "active" && parseErr == nil && time.Now().UTC().Before(expires)
+	if leaseID != input.LeaseID || leaseVersion != input.LeaseVersion || (!active && leaseStatus != "review") {
 		return submissionContext{}, ErrLeaseInvalid
 	}
 	if projectID != input.ProjectID || branch != input.SourceBranch || checkpointBranch != input.SourceBranch {

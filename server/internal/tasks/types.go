@@ -3,16 +3,19 @@ package tasks
 import "errors"
 
 var (
-	ErrNotFound          = errors.New("task not found")
-	ErrInvalidTransition = errors.New("invalid task status transition")
-	ErrProjectNotFound   = errors.New("project not found")
-	ErrProjectConflict   = errors.New("project is not reusable")
+	ErrNotFound            = errors.New("task not found")
+	ErrInvalidTransition   = errors.New("invalid task status transition")
+	ErrProjectNotFound     = errors.New("project not found")
+	ErrProjectConflict     = errors.New("project is not reusable")
+	ErrIdempotencyConflict = errors.New("idempotency key was already used with different task data")
+	ErrInvalidInput        = errors.New("invalid task input")
 )
 
 type CreateTaskInput struct {
-	Title       string
-	Description string
-	ProjectID   *int64
+	Title          string
+	Description    string
+	ProjectID      *int64
+	IdempotencyKey string
 }
 
 type Task struct {

@@ -33,6 +33,7 @@ type App struct {
 	Workspaces    *workspaces.Worker
 	LeaseRecovery *leases.Worker
 	Executor      *executor.Supervisor
+	MRReview      *mr.ReviewWorker
 	Deliveries    *deliveries.Worker
 	Pipelines     *pipelines.Worker
 	HTTP          httpapi.Dependencies
@@ -81,6 +82,8 @@ func New(cfg config.Config) (*App, error) {
 	leaseWorker.Start()
 	executorSupervisor := executor.NewSupervisor(cfg, conn, leaseSvc, nil, executor.SupervisorOptions{GlobalLimit: 1})
 	executorSupervisor.Start()
+	mrReviewWorker := mr.NewReviewWorker(conn, mrSvc, agentSvc, 2*time.Second)
+	mrReviewWorker.Start()
 	pipelineSvc := pipelines.NewService(conn)
 	pipelineWorker := pipelines.NewWorker(conn, pipelines.CommandRunner{}, 2*time.Second, func(projectID int64) (string, error) {
 		var dir string
@@ -97,6 +100,7 @@ func New(cfg config.Config) (*App, error) {
 		Workspaces:    workspaceWorker,
 		LeaseRecovery: leaseWorker,
 		Executor:      executorSupervisor,
+		MRReview:      mrReviewWorker,
 		Deliveries:    deliveryWorker,
 		Pipelines:     pipelineWorker,
 		HTTP:          httpapi.Dependencies{DB: conn, Agents: agentSvc, Launcher: launcher, Bus: bus, Tasks: taskSvc, MR: mrSvc, Issues: issueSvc, Assignments: assignmentSvc, Workspaces: workspaceSvc, Leases: leaseSvc, Executor: executor.NewAdminService(conn, executorSupervisor), Deliveries: deliverySvc, Pipelines: pipelineSvc},
@@ -110,6 +114,9 @@ func (a *App) Close() error {
 	}
 	if a.Deliveries != nil {
 		a.Deliveries.Close()
+	}
+	if a.MRReview != nil {
+		a.MRReview.Close()
 	}
 	if a.Executor != nil {
 		a.Executor.Close()

@@ -62,6 +62,35 @@ func (s *Service) SubmitReport(ctx context.Context, principal Principal, input C
 		return MRDetail{}, err
 	}
 	mrID, _ := res.LastInsertId()
+	res, err = tx.ExecContext(ctx, `update task_steps set status='review'
+		where id=? and task_id=? and agent_name=? and checkpoint_id=(
+			select id from task_checkpoints where task_id=? and step_id=? and lease_id=? and clean=1 and git_commit=? order by id desc limit 1
+		) and status in ('in_progress','checkpointed','review')`,
+		input.StepID, input.TaskID, principal.Name, input.TaskID, input.StepID, input.LeaseID, input.CheckpointCommit)
+	if err != nil {
+		return MRDetail{}, err
+	}
+	if changed, _ := res.RowsAffected(); changed != 1 {
+		return MRDetail{}, ErrStateConflict
+	}
+	res, err = tx.ExecContext(ctx, `update task_assignments set status='review'
+		where task_id=? and step_id=? and agent_name=? and status in ('assigned','review')`,
+		input.TaskID, input.StepID, principal.Name)
+	if err != nil {
+		return MRDetail{}, err
+	}
+	if changed, _ := res.RowsAffected(); changed != 1 {
+		return MRDetail{}, ErrStateConflict
+	}
+	res, err = tx.ExecContext(ctx, `update task_step_leases set status='review',updated_at=?
+		where lease_id=? and lease_version=? and agent_name=? and status='active'`,
+		now, input.LeaseID, input.LeaseVersion, principal.Name)
+	if err != nil {
+		return MRDetail{}, err
+	}
+	if changed, _ := res.RowsAffected(); changed != 1 {
+		return MRDetail{}, ErrStateConflict
+	}
 	reportEvent, err := insertReportEvent(ctx, tx, input.TaskID, "report.created", principal.Name, map[string]any{"report_id": reportID, "version": version, "step_id": input.StepID})
 	if err != nil {
 		return MRDetail{}, err

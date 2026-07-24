@@ -2,13 +2,18 @@ package tasks
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"wanxiang-agent/server/internal/config"
@@ -22,6 +27,9 @@ type Service struct {
 	db  *sql.DB
 	bus *events.Bus
 }
+
+var taskCreateMu sync.Mutex
+var errTaskCommitOutcomeUncertain = errors.New("task commit outcome remains uncertain")
 
 // List 分页查询任务列表。
 func (s *Service) List(ctx context.Context, limit, offset int) ([]Task, error) {
@@ -102,7 +110,11 @@ func (s *Service) UpdateStatus(ctx context.Context, id int64, next, actor string
 		return Task{}, ErrInvalidTransition
 	}
 	previous := detail.Task.Status
-	res, err := s.db.ExecContext(ctx, `update tasks set status=? where id=? and status=?`, next, id, previous)
+	query := `update tasks set status=? where id=? and status=?`
+	if previous == "blocked: planning_error" && next == "created" {
+		query = `update tasks set status=?,planning_attempts=0,planning_error_class='',planning_next_retry_at=null,planning_started_at=null,planning_condition_hash='' where id=? and status=?`
+	}
+	res, err := s.db.ExecContext(ctx, query, next, id, previous)
 	if err != nil {
 		return Task{}, err
 	}
@@ -177,16 +189,17 @@ func normalizePagination(limit, offset int) (int, int) {
 
 func validTransition(current, next string) bool {
 	allowed := map[string]map[string]bool{
-		"created":           {"planning": true, "blocked": true},
-		"planning":          {"assigned": true, "blocked": true},
-		"assigned":          {"workspace_ready": true, "in_progress": true, "blocked": true},
-		"workspace_ready":   {"in_progress": true, "blocked": true},
-		"in_progress":       {"review": true, "blocked": true, "interrupted": true},
-		"interrupted":       {"in_progress": true, "blocked": true},
-		"review":            {"merged": true, "changes_requested": true, "blocked": true},
-		"changes_requested": {"in_progress": true, "blocked": true},
-		"merged":            {"completed": true},
-		"blocked":           {"planning": true, "assigned": true, "in_progress": true},
+		"created":                 {"planning": true, "blocked": true},
+		"planning":                {"assigned": true, "blocked": true},
+		"assigned":                {"workspace_ready": true, "in_progress": true, "blocked": true},
+		"workspace_ready":         {"in_progress": true, "blocked": true},
+		"in_progress":             {"review": true, "blocked": true, "interrupted": true},
+		"interrupted":             {"in_progress": true, "blocked": true},
+		"review":                  {"merged": true, "changes_requested": true, "blocked": true},
+		"changes_requested":       {"in_progress": true, "blocked": true},
+		"merged":                  {"completed": true},
+		"blocked":                 {"planning": true, "assigned": true, "in_progress": true},
+		"blocked: planning_error": {"created": true},
 	}
 	return allowed[current][next]
 }
@@ -206,14 +219,31 @@ func (s *Service) CreateTask(ctx context.Context, title, description string, act
 
 // CreateTaskWithInput 在新建或既有项目中事务化创建任务。
 func (s *Service) CreateTaskWithInput(ctx context.Context, input CreateTaskInput, actors ...string) (task Task, err error) {
-	if strings.TrimSpace(input.Title) == "" {
-		return Task{}, errors.New("task title is required")
+	input.Title = strings.TrimSpace(input.Title)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.Title == "" {
+		return Task{}, fmt.Errorf("%w: task title is required", ErrInvalidInput)
+	}
+	if input.IdempotencyKey != "" && !idempotencyKeyPattern.MatchString(input.IdempotencyKey) {
+		return Task{}, fmt.Errorf("%w: invalid idempotency key", ErrInvalidInput)
+	}
+	if input.ProjectID != nil && *input.ProjectID <= 0 {
+		return Task{}, fmt.Errorf("%w: project_id must be positive", ErrInvalidInput)
+	}
+	if input.IdempotencyKey != "" {
+		taskCreateMu.Lock()
+		defer taskCreateMu.Unlock()
+		if existing, found, findErr := s.findIdempotentTask(ctx, input); findErr != nil {
+			return Task{}, findErr
+		} else if found {
+			return existing, nil
+		}
 	}
 	if input.ProjectID != nil {
 		return s.createTaskInExistingProject(ctx, input, actors...)
 	}
 	title, description := input.Title, input.Description
-	slug := fmt.Sprintf("task-%s-%s", time.Now().UTC().Format("20060102150405"), slugify(title))
+	slug := fmt.Sprintf("task-%s-%s-%s", time.Now().UTC().Format("20060102150405"), slugify(title), taskSlugSuffix())
 	projectDir := filepath.Join(s.cfg.ProjectDir, slug)
 	if _, statErr := os.Stat(projectDir); statErr == nil {
 		return Task{}, errors.New("task project already exists")
@@ -270,28 +300,32 @@ func (s *Service) CreateTaskWithInput(ctx context.Context, input CreateTaskInput
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := tx.ExecContext(ctx, `insert into projects(slug,dir,status,remote_url,created_at) values(?,?,?,?,?)`, slug, projectDir, "created", s.cfg.RemoteURL, createdAt)
 	if err != nil {
-		return Task{}, err
+		_ = tx.Rollback()
+		return s.resolveIdempotentCreateError(ctx, input, err)
 	}
 	projectID, _ := res.LastInsertId()
-	res, err = tx.ExecContext(ctx, `insert into tasks(project_id,title,description,status,priority,created_at) values(?,?,?,?,0,?)`, projectID, title, description, "created", createdAt)
+	fingerprint := createTaskFingerprint(input)
+	res, err = tx.ExecContext(ctx, `insert into tasks(project_id,title,description,status,priority,created_at,idempotency_key,request_fingerprint) values(?,?,?,?,0,?,?,?)`,
+		projectID, title, description, "created", createdAt, input.IdempotencyKey, fingerprint)
+	if err != nil {
+		_ = tx.Rollback()
+		return s.resolveIdempotentCreateError(ctx, input, err)
+	}
+	taskID, _ := res.LastInsertId()
+	actor := taskActor(actors)
+	event, err := insertTaskCreatedEvent(ctx, tx, taskID, projectID, slug, title, actor)
 	if err != nil {
 		return Task{}, err
 	}
-	taskID, _ := res.LastInsertId()
 	if err := tx.Commit(); err != nil {
-		return Task{}, err
+		recovered, committed, recoverErr := s.resolveNewProjectCommit(input, taskID, projectID, slug, err)
+		// 仅在已确认提交或数据库状态仍不可判定时保留目录；明确未提交则由 defer 清理。
+		keepProject = committed || errors.Is(recoverErr, errTaskCommitOutcomeUncertain)
+		return recovered, recoverErr
 	}
 	keepProject = true
 	task = Task{ID: taskID, ProjectID: projectID, ProjectSlug: slug, Title: title, Description: description, Status: "created"}
-	actor := "admin"
-	if len(actors) > 0 && actors[0] != "" {
-		actor = actors[0]
-	}
-	if err := s.bus.PublishJSON(ctx, &taskID, "task.created", actor, map[string]any{
-		"task_id": taskID, "project_id": projectID, "project_slug": slug, "title": title, "status": task.Status,
-	}); err != nil {
-		return Task{}, err
-	}
+	s.bus.Notify(event)
 	return task, nil
 }
 
@@ -319,21 +353,153 @@ func (s *Service) createTaskInExistingProject(ctx context.Context, input CreateT
 	if statusErr != nil || strings.TrimSpace(status) != "" {
 		return Task{}, fmt.Errorf("%w: project worktree must be clean", ErrProjectConflict)
 	}
-	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
-	result, err := s.db.ExecContext(ctx, `insert into tasks(project_id,title,description,status,priority,created_at) values(?,?,?,?,0,?)`, *input.ProjectID, input.Title, input.Description, "created", createdAt)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Task{}, err
 	}
-	taskID, _ := result.LastInsertId()
-	actor := "admin"
-	if len(actors) > 0 && actors[0] != "" {
-		actor = actors[0]
+	defer tx.Rollback()
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, `insert into tasks(project_id,title,description,status,priority,created_at,idempotency_key,request_fingerprint) values(?,?,?,?,0,?,?,?)`,
+		*input.ProjectID, input.Title, input.Description, "created", createdAt, input.IdempotencyKey, createTaskFingerprint(input))
+	if err != nil {
+		_ = tx.Rollback()
+		return s.resolveIdempotentCreateError(ctx, input, err)
 	}
-	task := Task{ID: taskID, ProjectID: *input.ProjectID, ProjectSlug: slug, Title: input.Title, Description: input.Description, Status: "created"}
-	if err := s.bus.PublishJSON(ctx, &taskID, "task.created", actor, map[string]any{"task_id": taskID, "project_id": *input.ProjectID, "project_slug": slug, "title": input.Title, "status": task.Status}); err != nil {
+	taskID, _ := result.LastInsertId()
+	actor := taskActor(actors)
+	event, err := insertTaskCreatedEvent(ctx, tx, taskID, *input.ProjectID, slug, input.Title, actor)
+	if err != nil {
 		return Task{}, err
 	}
+	task := Task{ID: taskID, ProjectID: *input.ProjectID, ProjectSlug: slug, Title: input.Title, Description: input.Description, Status: "created"}
+	if err := tx.Commit(); err != nil {
+		return s.resolveIdempotentCommitError(input, err)
+	}
+	s.bus.Notify(event)
 	return task, nil
+}
+
+var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
+func (s *Service) findIdempotentTask(ctx context.Context, input CreateTaskInput) (Task, bool, error) {
+	var task Task
+	var fingerprint string
+	err := s.db.QueryRowContext(ctx, `select t.id,t.project_id,p.slug,t.title,t.description,t.status,t.request_fingerprint
+		from tasks t join projects p on p.id=t.project_id where t.idempotency_key=?`, input.IdempotencyKey).
+		Scan(&task.ID, &task.ProjectID, &task.ProjectSlug, &task.Title, &task.Description, &task.Status, &fingerprint)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Task{}, false, nil
+	}
+	if err != nil {
+		return Task{}, false, err
+	}
+	if fingerprint != createTaskFingerprint(input) {
+		return Task{}, false, ErrIdempotencyConflict
+	}
+	return task, true, nil
+}
+
+func createTaskFingerprint(input CreateTaskInput) string {
+	raw, _ := json.Marshal(struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		ProjectID   *int64 `json:"project_id"`
+	}{Title: input.Title, Description: input.Description, ProjectID: input.ProjectID})
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Service) resolveIdempotentCreateError(ctx context.Context, input CreateTaskInput, original error) (Task, error) {
+	if input.IdempotencyKey == "" {
+		return Task{}, original
+	}
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if existing, found, err := s.findIdempotentTask(ctx, input); err != nil {
+			if !isSQLiteBusy(err) {
+				return Task{}, err
+			}
+		} else if found {
+			return existing, nil
+		}
+		select {
+		case <-ctx.Done():
+			return Task{}, ctx.Err()
+		case <-deadline.C:
+			return Task{}, original
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) resolveIdempotentCommitError(input CreateTaskInput, original error) (Task, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return s.resolveIdempotentCreateError(ctx, input, original)
+}
+
+func (s *Service) resolveNewProjectCommit(input CreateTaskInput, taskID, projectID int64, slug string, original error) (Task, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var task Task
+		var fingerprint string
+		err := s.db.QueryRowContext(ctx, `select t.id,t.project_id,p.slug,t.title,t.description,t.status,t.request_fingerprint
+			from tasks t join projects p on p.id=t.project_id
+			where t.id=? and t.project_id=? and p.slug=?`, taskID, projectID, slug).
+			Scan(&task.ID, &task.ProjectID, &task.ProjectSlug, &task.Title, &task.Description, &task.Status, &fingerprint)
+		switch {
+		case err == nil:
+			if fingerprint != createTaskFingerprint(input) {
+				return Task{}, true, ErrIdempotencyConflict
+			}
+			return task, true, nil
+		case errors.Is(err, sql.ErrNoRows):
+			return Task{}, false, original
+		case !isSQLiteBusy(err):
+			return Task{}, false, errors.Join(original, errTaskCommitOutcomeUncertain, fmt.Errorf("resolve task commit outcome: %w", err))
+		}
+		select {
+		case <-ctx.Done():
+			return Task{}, false, errors.Join(original, errTaskCommitOutcomeUncertain)
+		case <-ticker.C:
+		}
+	}
+}
+
+func isSQLiteBusy(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") || strings.Contains(message, "sqlite_busy")
+}
+
+func taskSlugSuffix() string {
+	raw := make([]byte, 4)
+	if _, err := rand.Read(raw); err == nil {
+		return hex.EncodeToString(raw)
+	}
+	return fmt.Sprintf("%08x", uint64(time.Now().UTC().UnixNano())&0xffffffff)
+}
+
+func insertTaskCreatedEvent(ctx context.Context, tx *sql.Tx, taskID, projectID int64, slug, title, actor string) (events.Event, error) {
+	payload, err := json.Marshal(map[string]any{
+		"task_id": taskID, "project_id": projectID, "project_slug": slug, "title": title, "status": "created",
+	})
+	if err != nil {
+		return events.Event{}, err
+	}
+	return events.InsertTx(ctx, tx, events.Event{TaskID: &taskID, Type: "task.created", Actor: actor, Payload: payload})
+}
+
+func taskActor(actors []string) string {
+	if len(actors) > 0 && strings.TrimSpace(actors[0]) != "" {
+		return actors[0]
+	}
+	return "admin"
 }
 
 func slugify(input string) string {

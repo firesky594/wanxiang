@@ -5,7 +5,7 @@ web/node_modules/
 web/dist/
 web/tsconfig.tsbuildinfo
 .env
-agents/
+/agents/
 server/wanxiang
 *.log
 .DS_Store

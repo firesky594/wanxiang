@@ -7,7 +7,7 @@ Vue Flow、浏览器 API 及框架生命周期回调不在此列。
 2. `web/src/api/client.ts` `listAgentConfigs`：获取全部 Agent 模型配置。
 3. `web/src/api/client.ts` `saveAgentConfig`：保存指定 Agent 的模型配置。
 4. `web/src/api/client.ts` `probeAgent`：探测指定 Agent 模型接口的可用性。
-5. `web/src/api/client.ts` `createAdminTask`：创建后台任务并可选择复用已有项目。
+5. `web/src/api/client.ts` `createAdminTask`：携带幂等键创建任务并可复用已有项目。
 6. `web/src/api/client.ts` `workspaceAction`：统一提交任务工作区管理操作。
 7. `web/src/api/client.ts` `getTaskWorkspace`：获取指定任务的工作区快照。
 8. `web/src/api/client.ts` `reconcileTaskWorkspace`：校验并协调任务工作区与记录状态。
@@ -62,7 +62,7 @@ Vue Flow、浏览器 API 及框架生命周期回调不在此列。
 57. `web/src/views/Agents.vue` `resetForm`：清除选择并恢复 Agent 表单默认值。
 58. `web/src/views/Agents.vue` `save`：校验并保存 Agent 配置后刷新列表。
 59. `web/src/views/Agents.vue` `probe`：探测 Agent 接口并刷新配置状态。
-60. `web/src/views/Dashboard.vue` `createTask`：校验信息并按项目模式创建任务。
+60. `web/src/views/Dashboard.vue` `createTask`：防重创建任务，成功关闭抽屉，失败保留表单。
 61. `web/src/views/Deliveries.vue` `label`：将交付状态转换为中文名称。
 62. `web/src/views/Deliveries.vue` `short`：截取提交标识用于简洁展示。
 63. `web/src/views/Deliveries.vue` `load`：加载交付列表及当前交付详情。
@@ -102,7 +102,7 @@ Vue Flow、浏览器 API 及框架生命周期回调不在此列。
 97. `web/src/components/AgentCanvas.vue` `resetLayout`：清除自定义坐标并恢复默认布局。
 98. `web/src/views/Dashboard.vue` `refreshAgents`：刷新 Agent 列表、连接状态及错误信息。
 99. `web/src/views/Dashboard.vue` `loadDashboardData`：初始化任务、项目、Agent 与实时事件。
-100. `web/src/views/Dashboard.vue` `openTaskComposer`：打开新建任务抽屉并清除上次结果。
+100. `web/src/views/Dashboard.vue` `openTaskComposer`：打开新建任务抽屉并保留未完成表单。
 101. `web/src/views/Dashboard.vue` `openTaskList`：打开并刷新持久任务列表抽屉。
 102. `web/src/views/Dashboard.vue` `resetAgentLayout`：重置 Agent 画布布局并提示结果。
 103. `web/src/components/AgentCanvas.vue` `selectAgent`：向父级发送用户选择的 Agent。
@@ -116,3 +116,6 @@ Vue Flow、浏览器 API 及框架生命周期回调不在此列。
 111. `web/src/views/Dashboard.vue` `openAgentConfig`：打开所选 Agent 的配置面板。
 112. `web/src/views/Dashboard.vue` `handleAgentConfigUpdated`：配置操作后刷新 Agent 状态。
 113. `web/src/views/Dashboard.vue` `handleDrawerClosed`：抽屉关闭后清除 Agent 选择。
+114. `web/src/views/Dashboard.vue` `resetTaskComposer`：重置任务表单并生成下一次幂等键。
+115. `web/src/views/Dashboard.vue` `createTaskIdempotencyKey`：兼容生成单次任务提交幂等键。
+116. `web/src/views/Dashboard.vue` `currentTaskSubmissionFingerprint`：区分原样重试与编辑后新请求。

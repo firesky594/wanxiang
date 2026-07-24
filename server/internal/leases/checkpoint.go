@@ -66,7 +66,7 @@ func (s *Service) CreateCheckpoint(ctx context.Context, ref LeaseRef, input Chec
 	if err != nil || workspaceStatus != "ready" || owner != ref.AgentName {
 		return Checkpoint{}, ErrConflict
 	}
-	if err := validateGitCheckpoint(ctx, workspacePath, branchName, baseCommit, provisionCommit, input); err != nil {
+	if err := validateGitCheckpoint(ctx, workspacePath, branchName, baseCommit, provisionCommit, ref.StepID, input); err != nil {
 		return Checkpoint{}, err
 	}
 
@@ -146,17 +146,17 @@ func (s *Service) validateActiveRef(ctx context.Context, ref LeaseRef) error {
 	return nil
 }
 
-func validateGitCheckpoint(ctx context.Context, path, storedBranch, base, provision string, input CheckpointInput) error {
+func validateGitCheckpoint(ctx context.Context, path, storedBranch, base, provision string, stepID int64, input CheckpointInput) error {
 	branch, err := gitValue(ctx, path, "branch", "--show-current")
 	if err != nil || branch != storedBranch || input.BranchName != storedBranch {
 		return errors.New("checkpoint branch mismatch")
 	}
-	status, err := gitValue(ctx, path, "status", "--porcelain")
+	status, err := gitValue(ctx, path, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return err
 	}
 	if input.Clean {
-		if input.GitCommit == "" || status != "" {
+		if input.GitCommit == "" || checkpointStatusDirty(status, stepID) {
 			return errors.New("clean checkpoint does not match worktree")
 		}
 		head, err := gitValue(ctx, path, "rev-parse", "HEAD")
@@ -179,6 +179,28 @@ func validateGitCheckpoint(ctx context.Context, path, storedBranch, base, provis
 		return errors.New("context checkpoint must describe a dirty worktree without commit")
 	}
 	return nil
+}
+
+func checkpointStatusDirty(status string, stepID int64) bool {
+	prefix := filepath.ToSlash(filepath.Join(".wanxiang", "checkpoints", fmt.Sprintf("%d", stepID))) + "/"
+	for _, line := range strings.Split(status, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(line) < 4 {
+			return true
+		}
+		path := strings.TrimSpace(line[3:])
+		if strings.Contains(path, " -> ") {
+			path = strings.TrimSpace(strings.SplitN(path, " -> ", 2)[1])
+		}
+		path = filepath.ToSlash(path)
+		if strings.HasPrefix(path, prefix) && strings.HasSuffix(strings.ToLower(path), ".yaml") {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func gitValue(ctx context.Context, path string, args ...string) (string, error) {

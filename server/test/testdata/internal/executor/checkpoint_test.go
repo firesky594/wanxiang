@@ -13,9 +13,6 @@ import (
 
 func TestGitCheckpointCommitsScopedFilesWithChineseMessage(t *testing.T) {
 	tools, ref, root := fileToolsFixture(t)
-	git(t, root, "init", "-b", "agent/agent-a/files")
-	git(t, root, "config", "user.name", "Test")
-	git(t, root, "config", "user.email", "test@example.com")
 	os.MkdirAll(filepath.Join(root, "src"), 0o755)
 	os.WriteFile(filepath.Join(root, "src", "main.go"), []byte("package src\n"), 0o644)
 	git(t, root, "add", ".")
@@ -44,9 +41,6 @@ func (r *recordingCheckpointCreator) CreateCheckpoint(_ context.Context, ref lea
 
 func TestGitCheckpointRejectsSensitiveUnknownFile(t *testing.T) {
 	tools, ref, root := fileToolsFixture(t)
-	git(t, root, "init", "-b", "agent/agent-a/files")
-	git(t, root, "config", "user.name", "Test")
-	git(t, root, "config", "user.email", "test@example.com")
 	os.WriteFile(filepath.Join(root, "README.md"), []byte("base"), 0o644)
 	git(t, root, "add", ".")
 	git(t, root, "commit", "-m", "初始化")

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"wanxiang-agent/server/internal/files"
 	"wanxiang-agent/server/internal/gitx"
 	"wanxiang-agent/server/internal/planning"
 )
@@ -22,14 +23,37 @@ const (
 	RepairFromGitSnapshot RepairDirection = "git_snapshot"
 )
 
-// ReconcileTask 核对数据库、快照与 Worktree 漂移。
+// ReconcileTask 核对数据库、快照与 Worktree 漂移，并在首次租约前同步已合并依赖。
 func (s *Service) ReconcileTask(ctx context.Context, taskID int64) (TaskWorkspace, error) {
-	workspace, err := s.GetTask(ctx, taskID)
-	if err != nil {
+	var projectID int64
+	var projectDir, taskStatus string
+	if err := s.db.QueryRowContext(ctx, `select p.id,p.dir,t.status from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).
+		Scan(&projectID, &projectDir, &taskStatus); err != nil {
 		return TaskWorkspace{}, err
 	}
-	var projectDir string
-	if err = s.db.QueryRowContext(ctx, `select p.dir from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&projectDir); err != nil {
+	if taskStatus != "workspace_ready" {
+		return s.GetTask(ctx, taskID)
+	}
+	lock := s.projectLock(projectID)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.db.QueryRowContext(ctx, `select p.dir,t.status from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).
+		Scan(&projectDir, &taskStatus); err != nil {
+		return TaskWorkspace{}, err
+	}
+	if taskStatus != "workspace_ready" {
+		return s.GetTask(ctx, taskID)
+	}
+	safeProjectDir, err := files.UnderRoot(s.cfg.ProjectDir, projectDir)
+	if err != nil {
+		return TaskWorkspace{}, fmt.Errorf("unsafe project path: %w", err)
+	}
+	projectDir = safeProjectDir
+	if err := s.markDependentWorkspacesWaiting(ctx, taskID); err != nil {
+		return TaskWorkspace{}, err
+	}
+	workspace, err := s.GetTask(ctx, taskID)
+	if err != nil {
 		return TaskWorkspace{}, err
 	}
 	drifted := false
@@ -41,39 +65,91 @@ func (s *Service) ReconcileTask(ctx context.Context, taskID int64) (TaskWorkspac
 			reasons = append(reasons, "snapshot_missing")
 		} else {
 			sum := sha256.Sum256(content)
-			if hex.EncodeToString(sum[:]) != item.MetadataHash {
-				reasons = append(reasons, "snapshot_hash_mismatch")
-			}
+			contentHash := hex.EncodeToString(sum[:])
 			metadata, decodeErr := DecodeAssignment(content)
 			if decodeErr != nil {
 				reasons = append(reasons, "snapshot_invalid")
-			} else if metadata.TaskID != taskID || metadata.StepID != item.StepID || metadata.AssignmentID != item.AssignmentID || metadata.AgentName != item.AgentName || metadata.ReportsTo != item.ReportsTo || metadata.BranchName != item.BranchName || metadata.BaseCommit != item.BaseCommit {
-				reasons = append(reasons, "database_snapshot_mismatch")
+			} else {
+				preparing := s.pendingHandoffSnapshotControlled(ctx, taskID, item, metadata)
+				if contentHash != item.MetadataHash && !preparing {
+					reasons = append(reasons, "snapshot_hash_mismatch")
+				}
+				if (metadata.TaskID != taskID || metadata.StepID != item.StepID || metadata.AssignmentID != item.AssignmentID || metadata.AgentName != item.AgentName || metadata.ReportsTo != item.ReportsTo || metadata.BranchName != item.BranchName || metadata.BaseCommit != item.BaseCommit) && !preparing {
+					reasons = append(reasons, "database_snapshot_mismatch")
+				}
 			}
 		}
 		branch, branchErr := runTrim(ctx, item.WorktreePath, "branch", "--show-current")
 		if branchErr != nil || branch != item.BranchName {
 			reasons = append(reasons, "worktree_branch_mismatch")
 		}
+		state, stateErr := s.loadStepControl(ctx, taskID, item.StepID)
+		if stateErr != nil {
+			return TaskWorkspace{}, stateErr
+		}
+		waiting := false
+		if len(reasons) == 0 && (item.Status == "waiting_dependencies" || item.Status == "dependency_syncing") {
+			syncResult, syncErr := s.syncDependenciesBeforeFirstLease(ctx, projectDir, taskID, item, state)
+			if syncErr != nil {
+				return TaskWorkspace{}, syncErr
+			}
+			item = syncResult.Item
+			state = syncResult.State
+			waiting = syncResult.Waiting
+			if syncResult.DriftReason != "" {
+				reasons = append(reasons, syncResult.DriftReason)
+			}
+		}
 		head, headErr := runTrim(ctx, item.WorktreePath, "rev-parse", "HEAD")
-		if headErr != nil || head != item.ProvisionCommit {
-			reasons = append(reasons, "worktree_head_mismatch")
+		if headErr != nil {
+			reasons = append(reasons, "worktree_head_missing")
+		} else if len(reasons) == 0 {
+			if reason := s.controlledHeadReason(ctx, projectDir, taskID, item, state, head); reason != "" {
+				reasons = append(reasons, reason)
+			}
 		}
 		if len(reasons) > 0 {
 			drifted = true
 			message := strings.Join(reasons, ",")
-			_, _ = s.db.ExecContext(ctx, `update project_workspaces set status='drifted',last_error=?,updated_at=? where id=?`, message, timestamp(), item.ID)
-		} else {
-			_, _ = s.db.ExecContext(ctx, `update project_workspaces set status='ready',last_error='',updated_at=? where id=?`, timestamp(), item.ID)
+			if err := s.updateWorkspaceStateCAS(ctx, taskID, item, "drifted", message); err != nil {
+				return TaskWorkspace{}, err
+			}
+		} else if !waiting {
+			if err := s.updateWorkspaceStateCAS(ctx, taskID, item, "ready", ""); err != nil {
+				return TaskWorkspace{}, err
+			}
 		}
 	}
+	nextTaskStatus := "workspace_ready"
 	if drifted {
-		_, _ = s.db.ExecContext(ctx, `update tasks set status='workspace_drifted' where id=?`, taskID)
+		nextTaskStatus = "workspace_drifted"
+	}
+	result, err := s.db.ExecContext(ctx, `update tasks set status=? where id=? and status='workspace_ready'`, nextTaskStatus, taskID)
+	if err != nil {
+		return TaskWorkspace{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return TaskWorkspace{}, errors.New("task changed concurrently during workspace reconciliation")
+	}
+	if drifted {
 		_ = s.bus.PublishJSON(ctx, &taskID, "task.workspace.drifted", "system", map[string]any{"task_id": taskID})
-	} else {
-		_, _ = s.db.ExecContext(ctx, `update tasks set status='workspace_ready' where id=?`, taskID)
 	}
 	return s.GetTask(ctx, taskID)
+}
+
+func (s *Service) updateWorkspaceStateCAS(ctx context.Context, taskID int64, item WorkspaceItem, status, lastError string) error {
+	result, err := s.db.ExecContext(ctx, `update project_workspaces set status=?,last_error=?,updated_at=?
+		where id=? and task_id=? and step_id=? and assignment_id=? and agent_name=? and branch_name=?
+			and worktree_path=? and base_commit=? and provision_commit=? and metadata_hash=? and status=?`,
+		status, lastError, timestamp(), item.ID, taskID, item.StepID, item.AssignmentID, item.AgentName,
+		item.BranchName, item.WorktreePath, item.BaseCommit, item.ProvisionCommit, item.MetadataHash, item.Status)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return errors.New("workspace changed concurrently during reconciliation")
+	}
+	return nil
 }
 
 // RepairTask 按指定可信源修复工作区漂移。

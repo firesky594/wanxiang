@@ -99,14 +99,41 @@ func (s *Service) UnfreezeStep(ctx context.Context, taskID, stepID int64, actor 
 		return Lease{}, err
 	}
 	defer tx.Rollback()
-	var oldID, agent, branch, worktree, leaseStatus, workspaceStatus string
+	var oldID, agent, branch, worktree, leaseStatus, workspaceStatus, baseCommit, provisionCommit string
 	var version, attempt int64
-	err = tx.QueryRowContext(ctx, `select ts.lease_id,ts.lease_version,ts.agent_name,ts.attempt,l.status,pw.branch_name,pw.worktree_path,pw.status
+	var checkpointID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `select ts.lease_id,ts.lease_version,ts.agent_name,ts.attempt,l.status,
+			pw.branch_name,pw.worktree_path,pw.status,pw.base_commit,pw.provision_commit,ts.checkpoint_id
 		from task_steps ts join task_step_leases l on l.lease_id=ts.lease_id
 		join project_workspaces pw on pw.task_id=ts.task_id and pw.step_id=ts.id and pw.agent_name=ts.agent_name
-		where ts.task_id=? and ts.id=?`, taskID, stepID).Scan(&oldID, &version, &agent, &attempt, &leaseStatus, &branch, &worktree, &workspaceStatus)
+		where ts.task_id=? and ts.id=? and ts.status='blocked'`, taskID, stepID).
+		Scan(&oldID, &version, &agent, &attempt, &leaseStatus, &branch, &worktree, &workspaceStatus, &baseCommit, &provisionCommit, &checkpointID)
 	if err != nil || leaseStatus != string(LeaseFrozen) || workspaceStatus != "ready" {
 		return Lease{}, ErrConflict
+	}
+	inheritedCommit := provisionCommit
+	if inheritedCommit == "" {
+		inheritedCommit = baseCommit
+	}
+	if checkpointID.Valid {
+		var checkpointLease, checkpointCommit, checkpointBranch string
+		var clean int
+		if err = tx.QueryRowContext(ctx, `select lease_id,git_commit,branch_name,clean
+			from task_checkpoints where id=? and task_id=? and step_id=?`,
+			checkpointID.Int64, taskID, stepID).
+			Scan(&checkpointLease, &checkpointCommit, &checkpointBranch, &clean); err != nil ||
+			checkpointLease != oldID || checkpointCommit == "" || checkpointBranch != branch || clean != 1 {
+			return Lease{}, ErrConflict
+		}
+		inheritedCommit = checkpointCommit
+	}
+	if checkpointID.Valid {
+		head, headErr := gitValue(ctx, worktree, "rev-parse", "HEAD")
+		status, statusErr := gitValue(ctx, worktree, "status", "--porcelain", "--untracked-files=all")
+		if headErr != nil || statusErr != nil || inheritedCommit == "" || head != inheritedCommit ||
+			len(recoveryDirtyPaths(status, stepID)) != 0 {
+			return Lease{}, ErrConflict
+		}
 	}
 	leaseID, err := randomLeaseID()
 	if err != nil {
@@ -118,7 +145,9 @@ func (s *Service) UnfreezeStep(ctx context.Context, taskID, stepID int64, actor 
 	if err != nil {
 		return Lease{}, err
 	}
-	result, err := tx.ExecContext(ctx, `update task_steps set status='in_progress',lease_id=?,lease_version=?,lease_expires_at=?,last_heartbeat_at=?,attempt=?,interrupted_at=null,resume_deadline=null where task_id=? and id=? and lease_id=?`, leaseID, version, formatTime(expires), formatTime(now), attempt+1, taskID, stepID, oldID)
+	result, err := tx.ExecContext(ctx, `update task_steps set status='in_progress',lease_id=?,lease_version=?,lease_expires_at=?,last_heartbeat_at=?,attempt=?,interrupted_at=null,resume_deadline=null
+		where task_id=? and id=? and lease_id=? and lease_version=? and status='blocked'`,
+		leaseID, version, formatTime(expires), formatTime(now), attempt+1, taskID, stepID, oldID, version-1)
 	if err != nil {
 		return Lease{}, err
 	}
@@ -126,7 +155,10 @@ func (s *Service) UnfreezeStep(ctx context.Context, taskID, stepID int64, actor 
 	if changed != 1 {
 		return Lease{}, ErrConflict
 	}
-	if err := insertAudit(ctx, tx, actor, "lease.unfreeze", stepTarget(taskID, stepID), map[string]any{"old_lease_id": oldID, "new_lease_id": leaseID, "lease_version": version}, now); err != nil {
+	if err := insertAudit(ctx, tx, actor, "lease.unfreeze", stepTarget(taskID, stepID), map[string]any{
+		"old_lease_id": oldID, "new_lease_id": leaseID, "lease_version": version,
+		"checkpoint_id": checkpointID.Int64, "inherited_commit": inheritedCommit,
+	}, now); err != nil {
 		return Lease{}, err
 	}
 	if err := tx.Commit(); err != nil {

@@ -304,7 +304,7 @@ func (s *Service) loadCandidates(ctx context.Context, taskID, version int64) ([]
 				select active.id,active.agent_name
 				from task_assignments active
 				join task_steps active_step on active_step.id=active.step_id
-				where active.status in ('assigned','running')
+				where active.status in ('assigned','running','review')
 				and not (active.task_id=? and active_step.plan_version=?)
 			) ta on ta.agent_name=ar.name
 			group by ar.id,ar.name,ar.status order by ar.name`, taskID, version)
@@ -337,7 +337,7 @@ func (s *Service) loadCandidate(ctx context.Context, name string, taskID, versio
 				select current.id,current.agent_name
 				from task_assignments current
 				join task_steps current_step on current_step.id=current.step_id
-				where current.status in ('assigned','running')
+				where current.status in ('assigned','running','review')
 				and not (current.task_id=? and current_step.plan_version=?)
 			) ta on ta.agent_name=ar.name
 			where ar.name=?
@@ -699,12 +699,11 @@ func upsertBlockedDecision(ctx context.Context, tx *sql.Tx, taskID int64, item b
 	var decisionID int64
 	var selectedAgent, currentReasons, currentRejections, currentStatus string
 	err = tx.QueryRowContext(ctx, `select id,coalesce(selected_agent,''),reasons_json,rejections_json,status
-		from agent_match_decisions
-		where task_id=? and step_id=? and created_by='system'
-		and status in ('blocked: missing_config','waiting: probe','blocked: missing_resources')
-		order by id desc limit 1`, taskID, item.step.id).
+			from agent_match_decisions
+			where task_id=? and step_id=? and created_by='system'
+			order by id desc limit 1`, taskID, item.step.id).
 		Scan(&decisionID, &selectedAgent, &currentReasons, &currentRejections, &currentStatus)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !isBlockedDecisionStatus(currentStatus)) {
 		_, err = tx.ExecContext(ctx, `insert into agent_match_decisions(
 				task_id,step_id,selected_agent,score,reasons_json,rejections_json,created_by,status,created_at
 			) values(?,?,?,0,?,?,'system',?,?)`,
@@ -746,9 +745,11 @@ func resolvePreparedBlockedDecisions(ctx context.Context, tx *sql.Tx, taskID int
 		}
 		var decisionID int64
 		err = tx.QueryRowContext(ctx, `select id from agent_match_decisions
-			where task_id=? and step_id=? and created_by='system'
-			and status in ('blocked: missing_config','waiting: probe','blocked: missing_resources')
-			order by id desc limit 1`, taskID, item.step.id).Scan(&decisionID)
+				where task_id=? and step_id=? and created_by='system'
+				and status in ('blocked: missing_config','waiting: probe','blocked: missing_resources')
+				and id=(select max(latest.id) from agent_match_decisions latest
+					where latest.task_id=? and latest.step_id=? and latest.created_by='system')
+				order by id desc limit 1`, taskID, item.step.id, taskID, item.step.id).Scan(&decisionID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -853,14 +854,16 @@ func (s *Service) prepareMappedAgent(ctx context.Context, taskID, version int64,
 func mappedGeneratedAgent(ctx context.Context, db *sql.DB, taskID, version, stepID int64) (string, bool, error) {
 	var name string
 	err := db.QueryRowContext(ctx, `select coalesce(md.selected_agent,'')
-		from agent_match_decisions md
-		join task_steps ts on ts.id=md.step_id
-		where md.task_id=? and md.step_id=? and ts.plan_version=?
-		and md.created_by='system'
-		and md.status in ('blocked: missing_config','waiting: probe','blocked: missing_resources')
-		and md.selected_agent is not null
-		and md.selected_agent<>''
-		order by md.id desc limit 1`, taskID, stepID, version).Scan(&name)
+			from agent_match_decisions md
+			join task_steps ts on ts.id=md.step_id
+			where md.task_id=? and md.step_id=? and ts.plan_version=?
+			and md.created_by='system'
+			and md.status in ('blocked: missing_config','waiting: probe','blocked: missing_resources')
+			and md.selected_agent is not null
+			and md.selected_agent<>''
+			and md.id=(select max(latest.id) from agent_match_decisions latest
+				where latest.task_id=? and latest.step_id=? and latest.created_by='system')
+			order by md.id desc limit 1`, taskID, stepID, version, taskID, stepID).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -1301,6 +1304,15 @@ func sanitizeKind(value string) string {
 
 func hasExactProjectAccess(items []string, want string) bool {
 	return len(items) == 1 && strings.TrimSpace(items[0]) == want
+}
+
+func isBlockedDecisionStatus(status string) bool {
+	switch status {
+	case "blocked: missing_config", "waiting: probe", "blocked: missing_resources":
+		return true
+	default:
+		return false
+	}
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }

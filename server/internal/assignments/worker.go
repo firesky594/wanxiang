@@ -14,12 +14,13 @@ type TaskAssigner interface {
 }
 
 type Worker struct {
-	db       *sql.DB
-	assigner TaskAssigner
-	interval time.Duration
-	mu       sync.Mutex
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	db          *sql.DB
+	assigner    TaskAssigner
+	interval    time.Duration
+	lifecycleMu sync.Mutex
+	mu          sync.Mutex
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 }
 
 // NewWorker 创建任务自动分配轮询器。
@@ -32,6 +33,8 @@ func NewWorker(db *sql.DB, assigner TaskAssigner, interval time.Duration) *Worke
 
 // Start 启动待分配任务轮询。
 func (w *Worker) Start() {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
 	w.mu.Lock()
 	if w.cancel != nil {
 		w.mu.Unlock()
@@ -59,6 +62,8 @@ func (w *Worker) Start() {
 
 // Close 停止分配轮询并等待退出。
 func (w *Worker) Close() {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
 	w.mu.Lock()
 	cancel := w.cancel
 	w.cancel = nil
@@ -91,6 +96,13 @@ func (w *Worker) runOnce(ctx context.Context) {
 					and mapped.status in ('blocked: missing_config','waiting: probe','blocked: missing_resources')
 					and mapped.selected_agent is not null
 					and mapped.selected_agent<>''
+					and mapped.id=(
+						select max(latest.id)
+						from agent_match_decisions latest
+						where latest.task_id=t.id
+						and latest.step_id=mapped.step_id
+						and latest.created_by='system'
+					)
 				)
 				or exists (
 					select 1
@@ -108,13 +120,10 @@ func (w *Worker) runOnce(ctx context.Context) {
 					and ready.id=(
 						select max(latest.id)
 						from agent_match_decisions latest
-						where latest.task_id=t.id
-						and latest.step_id=ready.step_id
-						and latest.created_by='system'
-						and latest.status in ('blocked: missing_config','waiting: probe','blocked: missing_resources')
-						and latest.selected_agent is not null
-						and latest.selected_agent<>''
-					)
+							where latest.task_id=t.id
+							and latest.step_id=ready.step_id
+							and latest.created_by='system'
+						)
 					and (
 						(ready.status='blocked: missing_config' and ready_agent.status in ('configured','online'))
 						or (ready.status='waiting: probe' and ready_agent.status='online')
@@ -142,13 +151,10 @@ func (w *Worker) runOnce(ctx context.Context) {
 				and ready.id=(
 					select max(latest.id)
 					from agent_match_decisions latest
-					where latest.task_id=t.id
-					and latest.step_id=ready.step_id
-					and latest.created_by='system'
-					and latest.status in ('blocked: missing_config','waiting: probe','blocked: missing_resources')
-					and latest.selected_agent is not null
-					and latest.selected_agent<>''
-				)
+							where latest.task_id=t.id
+							and latest.step_id=ready.step_id
+							and latest.created_by='system'
+						)
 				and julianday(ready.created_at)<=julianday(?)
 			)
 		)

@@ -39,7 +39,7 @@ type AgentChatter interface {
 	ChatAgent(context.Context, string, []providers.Message, int) (providers.Result, error)
 }
 
-// CompletionReporter 定义执行完成后送交人工评审的报告接口。
+// CompletionReporter 定义执行完成后送交项目负责人评审的报告接口。
 type CompletionReporter interface {
 	SubmitCompleted(context.Context, leases.LeaseRef) error
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"wanxiang-agent/server/internal/config"
@@ -94,13 +95,18 @@ func fileToolsFixture(t *testing.T) (*FileTools, leases.LeaseRef, string) {
 	t.Helper()
 	conn := testutil.OpenDB(t)
 	root := t.TempDir()
+	git(t, root, "init", "-b", "agent/agent-a/files")
+	git(t, root, "config", "user.name", "Test")
+	git(t, root, "config", "user.email", "test@example.com")
+	git(t, root, "commit", "--allow-empty", "-m", "初始化测试工作区")
+	base := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
 	projectID := mustInsertID(t, conn, `insert into projects(slug,dir,status,remote_url,created_at) values('executor-files',?,'created','','now')`, root)
 	taskID := mustInsertID(t, conn, `insert into tasks(project_id,title,description,status,created_at) values(?,'files','test','workspace_ready','now')`, projectID)
 	stepID := mustInsertID(t, conn, `insert into task_steps(task_id,agent_name,kind,status,input,created_at) values(?,'agent-a','backend','assigned','{}','now')`, taskID)
 	if _, err := conn.Exec(`insert into task_assignments(task_id,step_id,agent_name,status,decision_id,created_at) values(?,?,'agent-a','assigned',1,'now')`, taskID, stepID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conn.Exec(`insert into project_workspaces(project_id,task_id,step_id,assignment_id,agent_name,branch_name,worktree_path,base_commit,provision_commit,write_scope_json,metadata_hash,status,created_at,updated_at) values(?,?,?,1,'agent-a','agent/agent-a/files',?,'base','base','["src"]','hash','ready','now','now')`, projectID, taskID, stepID, root); err != nil {
+	if _, err := conn.Exec(`insert into project_workspaces(project_id,task_id,step_id,assignment_id,agent_name,branch_name,worktree_path,base_commit,provision_commit,write_scope_json,metadata_hash,status,created_at,updated_at) values(?,?,?,1,'agent-a','agent/agent-a/files',?,?,?,'["src"]','hash','ready','now','now')`, projectID, taskID, stepID, root, base, base); err != nil {
 		t.Fatal(err)
 	}
 	workspaceService := workspaces.NewService(config.Config{}, conn, nil)

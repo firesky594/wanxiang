@@ -22,6 +22,7 @@ import (
 const (
 	defaultManagerSupervisionInterval = 15 * time.Second
 	maxAgentProbeRetryDelay           = 5 * time.Minute
+	activeAgentProbeInterval          = 2 * time.Minute
 	managerRuntimeStatusPath          = "summaries/runtime-status.md"
 	legacyGeneratedEnvExample         = "# 在本地安全配置实际 Provider 凭据，不要提交密钥。\nPROVIDER_API_KEY=\n"
 	standardGeneratedEnvExample       = "# 在本地安全配置实际 Provider 凭据，不要提交密钥。\nAGENT_PROVIDER_TYPE=openai\nAGENT_API_KEY=\nAGENT_BASE_URL=https://api.openai.com/v1\nAGENT_MODEL=\n"
@@ -52,6 +53,7 @@ type ManagerSupervisor struct {
 	lastFingerprint string
 	lastFailure     string
 	probeRetries    map[string]agentProbeRetry
+	lastProbes      map[string]time.Time
 	now             func() time.Time
 }
 
@@ -65,10 +67,12 @@ type managerSupervisionError struct {
 	err   error
 }
 
+// Error 返回带巡检阶段的错误描述，便于定位失败环节。
 func (e *managerSupervisionError) Error() string {
 	return e.phase + ": " + e.err.Error()
 }
 
+// Unwrap 返回巡检阶段包装的原始错误。
 func (e *managerSupervisionError) Unwrap() error {
 	return e.err
 }
@@ -133,7 +137,7 @@ func NewManagerSupervisor(service *Service, bus *events.Bus, starter AgentRuntim
 	}
 	return &ManagerSupervisor{
 		service: service, bus: bus, starter: starter, interval: interval,
-		probeRetries: map[string]agentProbeRetry{}, now: time.Now,
+		probeRetries: map[string]agentProbeRetry{}, lastProbes: map[string]time.Time{}, now: time.Now,
 	}
 }
 
@@ -283,6 +287,21 @@ func (s *ManagerSupervisor) restoreAgentRuntimes(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if s.starter.IsAgentActive(view.Name) {
+			now := s.currentTime()
+			if last := s.lastProbes[view.Name]; !last.IsZero() && now.Sub(last) < activeAgentProbeInterval {
+				delete(s.probeRetries, view.Name)
+				continue
+			}
+			if _, probeErr := s.starter.StartAgent(ctx, view.Name); probeErr != nil {
+				if errors.Is(probeErr, ErrProviderUnavailable) {
+					s.recordAgentProbeFailure(view.Name, now)
+					restoreErrors = append(restoreErrors, errors.Join(errAgentProviderUnavailable, probeErr))
+				} else {
+					restoreErrors = append(restoreErrors, fmt.Errorf("health probe %s: %w", view.Name, probeErr))
+				}
+				continue
+			}
+			s.lastProbes[view.Name] = now
 			delete(s.probeRetries, view.Name)
 			continue
 		}
@@ -305,6 +324,7 @@ func (s *ManagerSupervisor) restoreAgentRuntime(ctx context.Context, view AgentC
 			return fmt.Errorf("restore %s heartbeat: %w", view.Name, err)
 		}
 		delete(s.probeRetries, view.Name)
+		s.lastProbes[view.Name] = now
 		return nil
 	case "configured":
 		delete(s.probeRetries, view.Name)
@@ -316,6 +336,7 @@ func (s *ManagerSupervisor) restoreAgentRuntime(ctx context.Context, view AgentC
 			return fmt.Errorf("probe %s: %w", view.Name, err)
 		}
 		delete(s.probeRetries, view.Name)
+		s.lastProbes[view.Name] = now
 		return nil
 	case "blocked: provider_error":
 		retry := s.probeRetries[view.Name]
@@ -335,9 +356,11 @@ func (s *ManagerSupervisor) restoreAgentRuntime(ctx context.Context, view AgentC
 			return fmt.Errorf("probe %s: %w", view.Name, err)
 		}
 		delete(s.probeRetries, view.Name)
+		s.lastProbes[view.Name] = now
 		return nil
 	default:
 		delete(s.probeRetries, view.Name)
+		delete(s.lastProbes, view.Name)
 		return nil
 	}
 }
@@ -670,7 +693,7 @@ func (s *ManagerSupervisor) capture(ctx context.Context) (managerRuntimeSnapshot
 		}
 	}
 	agentRows, err := s.service.db.QueryContext(ctx, `select ar.name,ar.role,ar.status,coalesce(ar.current_task_id,0),
-		count(distinct case when ta.status in ('assigned','running') then ta.id end)
+			count(distinct case when ta.status in ('assigned','running','review') then ta.id end)
 		from agent_registry ar left join task_assignments ta on ta.agent_name=ar.name
 		group by ar.id,ar.name,ar.role,ar.status,ar.current_task_id order by ar.name`)
 	if err != nil {

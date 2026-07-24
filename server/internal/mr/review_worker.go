@@ -860,6 +860,7 @@ type cappedReviewWriter struct {
 	truncated bool
 }
 
+// Write 写入有容量上限的评审差异输出，并记录是否发生截断。
 func (w *cappedReviewWriter) Write(value []byte) (int, error) {
 	size := len(value)
 	available := w.remaining

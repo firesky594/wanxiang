@@ -55,12 +55,14 @@ func (s *Service) PlanTask(ctx context.Context, taskID int64) (Plan, error) {
 	if task.Status != "created" && task.Status != "blocked: planning_error" {
 		return Plan{}, fmt.Errorf("task status %q cannot be planned", task.Status)
 	}
-	attempt, err := s.claimInitialPlan(ctx, taskID)
+	managerDir := filepath.Join(s.cfg.AgentDir, "manager")
+	conditionHash := planningConditionFingerprint(managerDir)
+	attempt, err := s.claimInitialPlan(ctx, taskID, conditionHash)
 	if err != nil {
 		return Plan{}, err
 	}
 	task.Status = "planning"
-	messages, err := BuildMessages(filepath.Join(s.cfg.AgentDir, "manager"), task)
+	messages, err := BuildMessages(managerDir, task)
 	if err != nil {
 		return Plan{}, s.block(ctx, taskID, attempt, planningErrorConfiguration, "planning failed: manager prompt unavailable", err)
 	}
@@ -130,7 +132,7 @@ func (s *Service) loadTask(ctx context.Context, id int64) (tasks.Task, error) {
 	return item, err
 }
 
-func (s *Service) claimInitialPlan(ctx context.Context, taskID int64) (int, error) {
+func (s *Service) claimInitialPlan(ctx context.Context, taskID int64, conditionHash string) (int, error) {
 	now := time.Now().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -142,7 +144,8 @@ func (s *Service) claimInitialPlan(ctx context.Context, taskID int64) (int, erro
 			planning_attempts=planning_attempts+1,
 			planning_error_class='',
 			planning_next_retry_at=null,
-			planning_started_at=?
+			planning_started_at=?,
+			planning_condition_hash=?
 		where id=? and (
 			status='created'
 			or (
@@ -152,7 +155,7 @@ func (s *Service) claimInitialPlan(ctx context.Context, taskID int64) (int, erro
 				and planning_next_retry_at is not null
 				and planning_next_retry_at<=?
 			)
-		)`, now.Format(time.RFC3339Nano), taskID, planningErrorTransient, maxPlanningAttempts, now.Format(time.RFC3339Nano))
+		)`, now.Format(time.RFC3339Nano), conditionHash, taskID, planningErrorTransient, maxPlanningAttempts, now.Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, err
 	}
@@ -207,7 +210,7 @@ func (s *Service) persist(ctx context.Context, taskID, version int64, expectedSt
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `update tasks set status='planned',manager_summary=?,planning_error_class='',planning_next_retry_at=null,planning_started_at=null where id=? and status='planning'`, plan.Summary, taskID); err != nil {
+	if _, err := tx.ExecContext(ctx, `update tasks set status='planned',manager_summary=?,planning_error_class='',planning_next_retry_at=null,planning_started_at=null,planning_condition_hash='' where id=? and status='planning'`, plan.Summary, taskID); err != nil {
 		if expectedStatus == "planning" {
 			return err
 		}
@@ -225,6 +228,10 @@ func (s *Service) persist(ctx context.Context, taskID, version int64, expectedSt
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Service) planningCondition() string {
+	return planningConditionFingerprint(filepath.Join(s.cfg.AgentDir, "manager"))
 }
 
 func (s *Service) loadPersisted(ctx context.Context, taskID int64) (Plan, error) {

@@ -1,10 +1,13 @@
 package planning
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -62,39 +65,7 @@ type promptAgentInventory struct {
 }
 
 func readManagerMemory(managerDir string) (string, error) {
-	root := filepath.Join(managerDir, "memory")
-	info, err := os.Lstat(root)
-	if os.IsNotExist(err) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("memory root is not a safe directory")
-	}
-	paths := []string{}
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == root {
-			return nil
-		}
-		if strings.HasPrefix(entry.Name(), ".") {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("memory path contains symlink: %s", entry.Name())
-		}
-		if !entry.IsDir() {
-			paths = append(paths, path)
-		}
-		return nil
-	})
+	root, paths, err := managerMemoryPaths(managerDir)
 	if err != nil {
 		return "", err
 	}
@@ -102,7 +73,11 @@ func readManagerMemory(managerDir string) (string, error) {
 	var result strings.Builder
 	for _, path := range paths {
 		relative, _ := filepath.Rel(root, path)
-		header := "\n### " + filepath.ToSlash(relative) + "\n"
+		safeRelative := filepath.ToSlash(relative)
+		if memorySecretKeyPattern.MatchString(safeRelative) || memoryTokenPattern.MatchString(safeRelative) {
+			safeRelative = "[已脱敏文件名]"
+		}
+		header := "\n### " + safeRelative + "\n"
 		remaining := maxManagerMemoryBytes - result.Len() - len(header)
 		if remaining <= 0 {
 			break
@@ -123,6 +98,63 @@ func readManagerMemory(managerDir string) (string, error) {
 		}
 	}
 	return truncateUTF8(strings.TrimSpace(result.String()), maxManagerMemoryBytes), nil
+}
+
+func managerMemoryPaths(managerDir string) (string, []string, error) {
+	root := filepath.Join(managerDir, "memory")
+	info, err := os.Lstat(root)
+	if os.IsNotExist(err) {
+		return root, nil, nil
+	}
+	if err != nil {
+		return root, nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return root, nil, fmt.Errorf("memory root is not a safe directory")
+	}
+	paths := []string{}
+	for _, allowed := range []string{"summaries", "decisions"} {
+		allowedRoot := filepath.Join(root, allowed)
+		allowedInfo, statErr := os.Lstat(allowedRoot)
+		if os.IsNotExist(statErr) {
+			continue
+		}
+		if statErr != nil {
+			return root, nil, statErr
+		}
+		if !allowedInfo.IsDir() || allowedInfo.Mode()&os.ModeSymlink != 0 {
+			return root, nil, fmt.Errorf("memory %s is not a safe directory", allowed)
+		}
+		err = filepath.WalkDir(allowedRoot, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if path == allowedRoot {
+				return nil
+			}
+			relative, _ := filepath.Rel(root, path)
+			if filepath.ToSlash(relative) == managerRuntimeStatusMemoryPath {
+				return nil
+			}
+			if strings.HasPrefix(entry.Name(), ".") {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("memory path contains symlink: %s", entry.Name())
+			}
+			if !entry.IsDir() {
+				paths = append(paths, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return root, nil, err
+		}
+	}
+	return root, paths, nil
 }
 
 func buildAgentInventory(agentRoot string) (string, error) {
@@ -261,18 +293,80 @@ func readFilePrefix(path string, limit int) ([]byte, error) {
 	return content, nil
 }
 
+var (
+	memorySecretKeyPattern = regexp.MustCompile(`(?i)(api[_-]?key|authorization|password|passwd|secret|cookie|token|credential|private[_-]?key|access[_-]?key)`)
+	memoryTokenPattern     = regexp.MustCompile(`(?i)\b(sk-[A-Za-z0-9_-]{8,}|github_pat_[A-Za-z0-9_]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|AKIA[A-Z0-9]{12,})\b`)
+	memoryJWTPattern       = regexp.MustCompile(`\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`)
+	memoryURLUserPattern   = regexp.MustCompile(`(?i)(https?://)[^/\s:@]+:[^/\s@]+@`)
+)
+
 func redactMemory(content string) string {
 	lines := strings.Split(content, "\n")
+	secretIndent := -1
+	inPrivateBlock := false
 	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
 		lower := strings.ToLower(line)
-		for _, marker := range []string{"api_key", "api-key", "apikey", "authorization", "bearer ", "token=", "password", "secret", "cookie", "sk-"} {
-			if strings.Contains(lower, marker) {
-				lines[index] = "[已脱敏]"
-				break
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if inPrivateBlock {
+			lines[index] = "[已脱敏]"
+			if strings.Contains(lower, "end ") && strings.Contains(lower, "private key") {
+				inPrivateBlock = false
 			}
+			continue
 		}
+		if strings.Contains(lower, "begin ") && strings.Contains(lower, "private key") {
+			lines[index] = "[已脱敏]"
+			inPrivateBlock = true
+			continue
+		}
+		if secretIndent >= 0 && trimmed != "" && indent > secretIndent {
+			lines[index] = "[已脱敏]"
+			continue
+		}
+		if secretIndent >= 0 && trimmed != "" {
+			secretIndent = -1
+		}
+		if memorySecretKeyPattern.MatchString(lower) || strings.Contains(lower, "bearer ") {
+			lines[index] = "[已脱敏]"
+			if strings.HasSuffix(trimmed, ":") ||
+				strings.HasSuffix(trimmed, "[") ||
+				strings.HasSuffix(trimmed, "{") ||
+				strings.HasSuffix(trimmed, "|") ||
+				strings.HasSuffix(trimmed, ">") ||
+				strings.HasSuffix(trimmed, "|-") ||
+				strings.HasSuffix(trimmed, ">-") {
+				secretIndent = indent
+			} else {
+				secretIndent = -1
+			}
+			continue
+		}
+		sanitized := memoryURLUserPattern.ReplaceAllString(line, "${1}[已脱敏]@")
+		sanitized = memoryTokenPattern.ReplaceAllString(sanitized, "[已脱敏]")
+		sanitized = memoryJWTPattern.ReplaceAllString(sanitized, "[已脱敏]")
+		if looksLikeBareSecret(strings.TrimSpace(sanitized)) {
+			sanitized = "[已脱敏]"
+		}
+		lines[index] = sanitized
 	}
 	return strings.Join(lines, "\n")
+}
+
+func looksLikeBareSecret(value string) bool {
+	if len(value) < 24 || strings.ContainsAny(value, " \t") {
+		return false
+	}
+	hasLetter, hasDigit := false, false
+	for _, current := range value {
+		if current >= '0' && current <= '9' {
+			hasDigit = true
+		}
+		if (current >= 'a' && current <= 'z') || (current >= 'A' && current <= 'Z') {
+			hasLetter = true
+		}
+	}
+	return hasLetter && hasDigit
 }
 
 func formatInventoryList(values []string) string {
@@ -314,3 +408,33 @@ func truncateUTF8(value string, limit int) string {
 	}
 	return string(content)
 }
+
+func planningConditionFingerprint(managerDir string) string {
+	hash := sha256.New()
+	writeConditionPart := func(label string, content []byte, err error) {
+		_, _ = hash.Write([]byte(label + "\x00"))
+		if err != nil {
+			_, _ = hash.Write([]byte("error\x00" + err.Error()))
+			return
+		}
+		_, _ = hash.Write(content)
+	}
+	prompt, err := readRegularFile(filepath.Join(managerDir, "system_prompt.md"), maxManagerSystemPromptBytes)
+	writeConditionPart("system_prompt", prompt, err)
+	env, err := readRegularFile(filepath.Join(managerDir, "env"), 1024*1024)
+	if err == nil {
+		if info, statErr := os.Lstat(filepath.Join(managerDir, "env")); statErr == nil {
+			env = []byte(fmt.Sprintf("size=%d;mode=%s;mtime=%d\n%s", info.Size(), info.Mode().String(), info.ModTime().UnixNano(), redactMemory(string(env))))
+		} else {
+			err = statErr
+		}
+	}
+	writeConditionPart("env_metadata_and_redacted_values", env, err)
+	inventory, err := buildAgentInventory(filepath.Dir(managerDir))
+	writeConditionPart("inventory", []byte(inventory), err)
+	memory, err := readManagerMemory(managerDir)
+	writeConditionPart("memory", []byte(memory), err)
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+const managerRuntimeStatusMemoryPath = "summaries/runtime-status.md"

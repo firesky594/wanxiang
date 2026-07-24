@@ -151,7 +151,7 @@ func validateGitCheckpoint(ctx context.Context, path, storedBranch, base, provis
 	if err != nil || branch != storedBranch || input.BranchName != storedBranch {
 		return errors.New("checkpoint branch mismatch")
 	}
-	status, err := gitValue(ctx, path, "status", "--porcelain")
+	status, err := gitValue(ctx, path, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,7 @@ type Service struct {
 }
 
 var taskCreateMu sync.Mutex
+var errTaskCommitOutcomeUncertain = errors.New("task commit outcome remains uncertain")
 
 // List 分页查询任务列表。
 func (s *Service) List(ctx context.Context, limit, offset int) ([]Task, error) {
@@ -109,7 +110,11 @@ func (s *Service) UpdateStatus(ctx context.Context, id int64, next, actor string
 		return Task{}, ErrInvalidTransition
 	}
 	previous := detail.Task.Status
-	res, err := s.db.ExecContext(ctx, `update tasks set status=? where id=? and status=?`, next, id, previous)
+	query := `update tasks set status=? where id=? and status=?`
+	if previous == "blocked: planning_error" && next == "created" {
+		query = `update tasks set status=?,planning_attempts=0,planning_error_class='',planning_next_retry_at=null,planning_started_at=null,planning_condition_hash='' where id=? and status=?`
+	}
+	res, err := s.db.ExecContext(ctx, query, next, id, previous)
 	if err != nil {
 		return Task{}, err
 	}
@@ -184,16 +189,17 @@ func normalizePagination(limit, offset int) (int, int) {
 
 func validTransition(current, next string) bool {
 	allowed := map[string]map[string]bool{
-		"created":           {"planning": true, "blocked": true},
-		"planning":          {"assigned": true, "blocked": true},
-		"assigned":          {"workspace_ready": true, "in_progress": true, "blocked": true},
-		"workspace_ready":   {"in_progress": true, "blocked": true},
-		"in_progress":       {"review": true, "blocked": true, "interrupted": true},
-		"interrupted":       {"in_progress": true, "blocked": true},
-		"review":            {"merged": true, "changes_requested": true, "blocked": true},
-		"changes_requested": {"in_progress": true, "blocked": true},
-		"merged":            {"completed": true},
-		"blocked":           {"planning": true, "assigned": true, "in_progress": true},
+		"created":                 {"planning": true, "blocked": true},
+		"planning":                {"assigned": true, "blocked": true},
+		"assigned":                {"workspace_ready": true, "in_progress": true, "blocked": true},
+		"workspace_ready":         {"in_progress": true, "blocked": true},
+		"in_progress":             {"review": true, "blocked": true, "interrupted": true},
+		"interrupted":             {"in_progress": true, "blocked": true},
+		"review":                  {"merged": true, "changes_requested": true, "blocked": true},
+		"changes_requested":       {"in_progress": true, "blocked": true},
+		"merged":                  {"completed": true},
+		"blocked":                 {"planning": true, "assigned": true, "in_progress": true},
+		"blocked: planning_error": {"created": true},
 	}
 	return allowed[current][next]
 }
@@ -312,9 +318,9 @@ func (s *Service) CreateTaskWithInput(ctx context.Context, input CreateTaskInput
 		return Task{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		// Commit 返回错误时事务结果可能不确定；保留刚创建的项目目录，避免数据库已提交却被清理。
-		keepProject = true
-		recovered, recoverErr := s.resolveIdempotentCommitError(input, err)
+		recovered, committed, recoverErr := s.resolveNewProjectCommit(input, taskID, projectID, slug, err)
+		// 仅在已确认提交或数据库状态仍不可判定时保留目录；明确未提交则由 defer 清理。
+		keepProject = committed || errors.Is(recoverErr, errTaskCommitOutcomeUncertain)
 		return recovered, recoverErr
 	}
 	keepProject = true
@@ -433,6 +439,37 @@ func (s *Service) resolveIdempotentCommitError(input CreateTaskInput, original e
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	return s.resolveIdempotentCreateError(ctx, input, original)
+}
+
+func (s *Service) resolveNewProjectCommit(input CreateTaskInput, taskID, projectID int64, slug string, original error) (Task, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var task Task
+		var fingerprint string
+		err := s.db.QueryRowContext(ctx, `select t.id,t.project_id,p.slug,t.title,t.description,t.status,t.request_fingerprint
+			from tasks t join projects p on p.id=t.project_id
+			where t.id=? and t.project_id=? and p.slug=?`, taskID, projectID, slug).
+			Scan(&task.ID, &task.ProjectID, &task.ProjectSlug, &task.Title, &task.Description, &task.Status, &fingerprint)
+		switch {
+		case err == nil:
+			if fingerprint != createTaskFingerprint(input) {
+				return Task{}, true, ErrIdempotencyConflict
+			}
+			return task, true, nil
+		case errors.Is(err, sql.ErrNoRows):
+			return Task{}, false, original
+		case !isSQLiteBusy(err):
+			return Task{}, false, errors.Join(original, errTaskCommitOutcomeUncertain, fmt.Errorf("resolve task commit outcome: %w", err))
+		}
+		select {
+		case <-ctx.Done():
+			return Task{}, false, errors.Join(original, errTaskCommitOutcomeUncertain)
+		case <-ticker.C:
+		}
+	}
 }
 
 func isSQLiteBusy(err error) bool {

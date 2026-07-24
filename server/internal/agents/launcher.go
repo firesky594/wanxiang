@@ -67,11 +67,21 @@ func (l *Launcher) StartAll(ctx context.Context) (ManagerStatus, error) {
 
 	status, startErr := l.Start(ctx)
 	if startErr != nil {
-		if !errors.Is(startErr, ErrProviderUnavailable) {
+		blockedStatus := ""
+		switch {
+		case errors.Is(startErr, ErrProviderUnavailable):
+			blockedStatus = "blocked: provider_error"
+		case errors.Is(startErr, ErrAgentConfigInvalid):
+			blockedStatus = "blocked: missing_config"
+		default:
 			l.stopRuntime()
 			return status, startErr
 		}
-		status.Status = "blocked: provider_error"
+		if markErr := l.service.markUnavailable(ctx, "manager", blockedStatus); markErr != nil {
+			l.stopRuntime()
+			return status, errors.Join(startErr, markErr)
+		}
+		status.Status = blockedStatus
 	}
 	views, listErr := l.service.ListAgentConfigs(ctx)
 	if listErr != nil {
@@ -85,17 +95,14 @@ func (l *Launcher) StartAll(ctx context.Context) (ManagerStatus, error) {
 		if !view.SecretConfigured || view.ProviderType == "" || view.Model == "" {
 			continue
 		}
-		var agentErr error
-		if view.Status == "online" {
-			_, agentErr = l.StartConfiguredAgent(ctx, view.Name)
-		} else {
-			_, agentErr = l.StartAgent(ctx, view.Name)
-		}
-		if agentErr == nil || errors.Is(agentErr, ErrProviderUnavailable) {
+		if view.Status != "online" {
+			// Provider 探测交给异步 Supervisor，避免单个 Agent 阻塞整站启动。
 			continue
 		}
-		l.stopRuntime()
-		return status, agentErr
+		if _, agentErr := l.StartConfiguredAgent(ctx, view.Name); agentErr != nil {
+			l.deactivate(view.Name)
+			_ = l.service.markUnavailable(ctx, view.Name, "blocked: missing_config")
+		}
 	}
 	l.supervisor.Start()
 	return status, nil

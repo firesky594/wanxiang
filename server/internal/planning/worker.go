@@ -16,14 +16,19 @@ type ManagerReadiness interface {
 	ManagerReady(context.Context) (bool, error)
 }
 
+type planningConditionProvider interface {
+	planningCondition() string
+}
+
 type Worker struct {
-	db        *sql.DB
-	planner   TaskPlanner
-	readiness ManagerReadiness
-	interval  time.Duration
-	mu        sync.Mutex
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	db          *sql.DB
+	planner     TaskPlanner
+	readiness   ManagerReadiness
+	interval    time.Duration
+	lifecycleMu sync.Mutex
+	mu          sync.Mutex
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 
 	readinessObserved bool
 	managerWasReady   bool
@@ -39,6 +44,8 @@ func NewWorker(db *sql.DB, planner TaskPlanner, readiness ManagerReadiness, inte
 
 // Start 启动待规划任务轮询。
 func (w *Worker) Start() {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
 	w.mu.Lock()
 	if w.cancel != nil {
 		w.mu.Unlock()
@@ -68,6 +75,8 @@ func (w *Worker) Start() {
 
 // Close 停止规划轮询并等待退出。
 func (w *Worker) Close() {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
 	w.mu.Lock()
 	cancel := w.cancel
 	w.cancel = nil
@@ -90,22 +99,39 @@ func (w *Worker) runOnce(ctx context.Context) {
 		return
 	}
 	w.mu.Lock()
-	managerRecovered := ready && (!w.readinessObserved || !w.managerWasReady)
+	managerRecovered := w.readinessObserved && ready && !w.managerWasReady
 	w.readinessObserved = true
 	w.managerWasReady = ready
 	w.mu.Unlock()
 	if !ready {
 		return
 	}
-	if managerRecovered {
+	conditionHash := ""
+	if provider, ok := w.planner.(planningConditionProvider); ok {
+		conditionHash = provider.planningCondition()
+	}
+	if managerRecovered || conditionHash != "" {
+		recovered := 0
+		if managerRecovered {
+			recovered = 1
+		}
 		if _, err := w.db.ExecContext(ctx, `update tasks
 			set status='created',
 				planning_attempts=0,
 				planning_error_class='',
 				planning_next_retry_at=null,
-				planning_started_at=null
+				planning_started_at=null,
+				planning_condition_hash=?
 			where status='blocked: planning_error'
-				and planning_error_class in (?, '')`, planningErrorConfiguration); err != nil {
+				and (
+					planning_error_class in (?, '')
+					or (planning_error_class=? and planning_attempts>=? and planning_next_retry_at is null)
+				)
+				and (
+					(?<>'' and planning_condition_hash<>?)
+					or ?=1
+				)`, conditionHash, planningErrorConfiguration, planningErrorTransient, maxPlanningAttempts,
+			conditionHash, conditionHash, recovered); err != nil {
 			return
 		}
 	}

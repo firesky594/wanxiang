@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"wanxiang-agent/server/internal/leases"
@@ -314,7 +317,7 @@ func copyCheckWorkspace(ctx context.Context, root string) (string, func(), error
 		cleanup()
 		return "", nil, err
 	}
-	cmd := exec.CommandContext(ctx, "cp", "-a", "--reflink=auto", filepath.Join(root, "."), target)
+	cmd := exec.CommandContext(ctx, "cp", "-a", "--reflink=auto", filepath.Clean(root)+string(filepath.Separator)+".", target)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("copy check workspace: %w: %s", err, Redact(string(output)))
@@ -329,28 +332,54 @@ func copyCheckWorkspace(ctx context.Context, root string) (string, func(), error
 }
 
 func sandboxedCheckCommand(ctx context.Context, root, binary string, commandArgs []string) (*exec.Cmd, error) {
-	bwrap, err := exec.LookPath("bwrap")
+	const bwrap = "/usr/bin/bwrap"
+	info, err := os.Lstat(bwrap)
 	if err != nil {
 		return nil, errors.New("check sandbox is unavailable")
+	}
+	stat, ownedByRoot := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 ||
+		info.Mode().Perm()&0o022 != 0 || !ownedByRoot || stat.Uid != 0 {
+		return nil, errors.New("check sandbox is unavailable")
+	}
+	toolchain, err := resolveCheckToolchain(binary)
+	if err != nil {
+		return nil, errors.New("check toolchain is unavailable")
 	}
 	args := []string{
 		"--die-with-parent",
 		"--unshare-all",
 		"--new-session",
 		"--clearenv",
-		"--ro-bind", "/usr", "/usr",
-		"--ro-bind", "/bin", "/bin",
-		"--ro-bind", "/lib", "/lib",
-		"--ro-bind", "/lib64", "/lib64",
-		"--ro-bind", "/etc", "/etc",
+		"--bind", root, "/workspace",
+		"--dir", "/usr",
+		"--ro-bind", "/usr/bin", "/usr/bin",
+		"--ro-bind", "/usr/lib", "/usr/lib",
+		"--ro-bind", "/usr/lib64", "/usr/lib64",
+		"--symlink", "usr/bin", "/bin",
+		"--symlink", "usr/lib", "/lib",
+		"--symlink", "usr/lib64", "/lib64",
+		"--dir", "/usr/include",
+		"--ro-bind", "/usr/include", "/usr/include",
+		"--dir", "/usr/share",
+		"--ro-bind", "/usr/share/zoneinfo", "/usr/share/zoneinfo",
+		"--dir", "/etc",
+		"--ro-bind", "/etc/passwd", "/etc/passwd",
+		"--ro-bind", "/etc/group", "/etc/group",
+		"--ro-bind", "/etc/nsswitch.conf", "/etc/nsswitch.conf",
+		"--ro-bind", "/etc/hosts", "/etc/hosts",
+		"--ro-bind", "/etc/localtime", "/etc/localtime",
+		"--dir", "/etc/ssl",
+		"--ro-bind", "/etc/ssl/certs", "/etc/ssl/certs",
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--tmpfs", "/tmp",
 		"--dir", "/tmp/home",
 		"--dir", "/tmp/cache",
-		"--bind", root, "/workspace",
+		"--dir", "/toolchains",
+		"--ro-bind", toolchain.source, toolchain.target,
 		"--chdir", "/workspace",
-		"--setenv", "PATH", "/workspace/node_modules/.bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
+		"--setenv", "PATH", toolchain.target + "/bin:/usr/bin:/bin:/workspace/node_modules/.bin",
 		"--setenv", "HOME", "/tmp/home",
 		"--setenv", "TMPDIR", "/tmp",
 		"--setenv", "GOCACHE", "/tmp/cache/go-build",
@@ -363,31 +392,298 @@ func sandboxedCheckCommand(ctx context.Context, root, binary string, commandArgs
 		"--setenv", "PNPM_HOME", "/tmp/cache/pnpm",
 		"--setenv", "CI", "1",
 	}
-	if moduleCache := hostGoModuleCache(ctx); moduleCache != "" {
+	if toolchain.goRoot {
+		args = append(args, "--setenv", "GOROOT", toolchain.target)
+		prepareCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		moduleMounts, mountErr := prepareGoModuleMounts(prepareCtx, root, filepath.Join(toolchain.source, "bin", "go"))
+		cancel()
+		if mountErr != nil {
+			return nil, errors.New("check module sandbox is unavailable")
+		}
+		args = append(args, "--dir", "/gomodcache")
+		args = append(args, goModuleMountArgs(moduleMounts)...)
 		args = append(args,
-			"--ro-bind", moduleCache, "/gomodcache",
 			"--setenv", "GOMODCACHE", "/gomodcache",
+			"--setenv", "GOSUMDB", "off",
 		)
 	}
-	args = append(args, "--", binary)
+	args = append(args, "--", toolchain.binary)
+	args = append(args, toolchain.prefixArgs...)
 	args = append(args, commandArgs...)
 	return exec.CommandContext(ctx, bwrap, args...), nil
 }
 
-func hostGoModuleCache(ctx context.Context) string {
-	commandCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(commandCtx, "go", "env", "GOMODCACHE")
+type checkToolchain struct {
+	source     string
+	target     string
+	binary     string
+	goRoot     bool
+	prefixArgs []string
+}
+
+func resolveCheckToolchain(binary string) (checkToolchain, error) {
+	absolute, err := filepath.Abs(binary)
+	if err != nil {
+		return checkToolchain{}, err
+	}
+	name := filepath.Base(absolute)
+	binDir := filepath.Dir(absolute)
+	if filepath.Base(binDir) != "bin" {
+		return checkToolchain{}, errors.New("unexpected toolchain layout")
+	}
+	switch name {
+	case "go":
+		resolved, err := filepath.EvalSymlinks(absolute)
+		if err != nil || filepath.Base(filepath.Dir(resolved)) != "bin" {
+			return checkToolchain{}, errors.New("invalid go toolchain")
+		}
+		source := filepath.Dir(filepath.Dir(resolved))
+		if err := validateTrustedToolchain("go", source); err != nil {
+			return checkToolchain{}, err
+		}
+		return checkToolchain{
+			source: source,
+			target: "/toolchains/go",
+			binary: "/toolchains/go/bin/go",
+			goRoot: true,
+		}, nil
+	case "npm", "pnpm":
+		source, err := filepath.EvalSymlinks(filepath.Dir(binDir))
+		if err != nil {
+			return checkToolchain{}, err
+		}
+		resolved, err := filepath.EvalSymlinks(absolute)
+		if err != nil || !pathWithin(source, resolved) {
+			return checkToolchain{}, errors.New("invalid node toolchain")
+		}
+		node, err := filepath.EvalSymlinks(filepath.Join(source, "bin", "node"))
+		if err != nil || !pathWithin(source, node) {
+			return checkToolchain{}, errors.New("node runtime is unavailable")
+		}
+		if err := validateTrustedToolchain(name, source); err != nil {
+			return checkToolchain{}, err
+		}
+		cli := "/toolchains/node/lib/node_modules/npm/bin/npm-cli.js"
+		if name == "pnpm" {
+			cli = "/toolchains/node/lib/node_modules/pnpm/bin/pnpm.cjs"
+		}
+		return checkToolchain{
+			source:     source,
+			target:     "/toolchains/node",
+			binary:     "/toolchains/node/bin/node",
+			prefixArgs: []string{cli},
+		}, nil
+	default:
+		return checkToolchain{}, errors.New("unsupported check toolchain")
+	}
+}
+
+func validateTrustedToolchain(command, root string) error {
+	if !filepath.IsAbs(root) || filepath.Clean(root) == string(filepath.Separator) {
+		return errors.New("toolchain root is unsafe")
+	}
+	allowed := false
+	switch command {
+	case "go":
+		for _, prefix := range []string{"/usr/local/btgojdk", "/usr/local/go", "/usr/lib/go", "/usr/lib/golang"} {
+			if pathWithin(prefix, root) {
+				allowed = true
+				break
+			}
+		}
+	case "npm", "pnpm":
+		allowed = pathWithin("/www/server/nodejs", root) || pathWithin("/usr", root)
+	}
+	if !allowed {
+		return errors.New("toolchain root is not allowed")
+	}
+	for current := filepath.Clean(root); current != string(filepath.Separator); current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o022 != 0 {
+			return errors.New("toolchain path is unsafe")
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != 0 {
+			return errors.New("toolchain ownership is unsafe")
+		}
+	}
+	return nil
+}
+
+func pathWithin(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+type goModuleMount struct {
+	source string
+	target string
+}
+
+type listedGoModule struct {
+	Path    string
+	Version string
+	Dir     string
+	GoMod   string
+	Main    bool
+	Replace *listedGoModule
+}
+
+func prepareGoModuleMounts(ctx context.Context, workspace, goBinary string) ([]goModuleMount, error) {
+	moduleCache, err := trustedGoModuleCache(ctx, goBinary)
+	if err != nil {
+		return nil, err
+	}
+	workspace, err = filepath.EvalSymlinks(workspace)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, goBinary, "list", "-m", "-json", "all")
+	cmd.Dir = workspace
+	cmd.Env = []string{
+		"PATH=" + filepath.Dir(goBinary) + ":/usr/bin:/bin",
+		"HOME=/tmp",
+		"GOROOT=" + filepath.Dir(filepath.Dir(goBinary)),
+		"GOMODCACHE=" + moduleCache,
+		"GOPATH=" + filepath.Dir(filepath.Dir(moduleCache)),
+		"GOPROXY=off",
+		"GOSUMDB=off",
+		"GOTOOLCHAIN=local",
+		"GOFLAGS=-mod=readonly",
+		"GOWORK=off",
+		"GOENV=off",
+	}
 	output, err := cmd.Output()
 	if err != nil {
-		return ""
+		return nil, err
 	}
-	path := strings.TrimSpace(string(output))
+	decoder := json.NewDecoder(strings.NewReader(string(output)))
+	seen := map[string]bool{}
+	var mounts []goModuleMount
+	for {
+		var module listedGoModule
+		if err := decoder.Decode(&module); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, err
+		}
+		if module.Main {
+			if module.Dir != "" {
+				mainDir, err := filepath.EvalSymlinks(module.Dir)
+				if err != nil || !pathWithin(workspace, mainDir) {
+					return nil, errors.New("main module is outside workspace")
+				}
+			}
+			continue
+		}
+		effective := module
+		if module.Replace != nil {
+			effective = *module.Replace
+			if effective.Version == "" {
+				localDir, err := filepath.EvalSymlinks(effective.Dir)
+				if err != nil || !pathWithin(workspace, localDir) {
+					return nil, errors.New("local module replacement is outside workspace")
+				}
+				continue
+			}
+		}
+		if effective.Version == "" {
+			return nil, errors.New("module dependency is not materialized")
+		}
+		if effective.Dir == "" && effective.GoMod == "" {
+			continue
+		}
+		dependencyPaths := []string{effective.Dir}
+		if effective.GoMod != "" {
+			if !strings.HasSuffix(effective.GoMod, ".mod") {
+				return nil, errors.New("module metadata path is unsafe")
+			}
+			metadataBase := strings.TrimSuffix(effective.GoMod, ".mod")
+			for _, extension := range []string{".info", ".mod", ".zip", ".ziphash"} {
+				candidate := metadataBase + extension
+				if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+					dependencyPaths = append(dependencyPaths, candidate)
+				}
+			}
+		}
+		for _, dependencyPath := range dependencyPaths {
+			if dependencyPath == "" {
+				continue
+			}
+			source, err := filepath.EvalSymlinks(dependencyPath)
+			if err != nil || !pathWithin(moduleCache, source) {
+				return nil, errors.New("module dependency is outside trusted cache")
+			}
+			relative, err := filepath.Rel(moduleCache, source)
+			if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				return nil, errors.New("module dependency path is unsafe")
+			}
+			target := filepath.ToSlash(filepath.Join("/gomodcache", relative))
+			if !seen[target] {
+				seen[target] = true
+				mounts = append(mounts, goModuleMount{source: source, target: target})
+				if len(mounts) > 256 {
+					return nil, errors.New("module dependency limit exceeded")
+				}
+			}
+		}
+	}
+	sort.Slice(mounts, func(i, j int) bool { return mounts[i].target < mounts[j].target })
+	return mounts, nil
+}
+
+func trustedGoModuleCache(ctx context.Context, goBinary string) (string, error) {
+	cmd := exec.CommandContext(ctx, goBinary, "env", "GOMODCACHE")
+	cmd.Env = []string{
+		"PATH=" + filepath.Dir(goBinary) + ":/usr/bin:/bin",
+		"HOME=" + os.Getenv("HOME"),
+		"GOROOT=" + filepath.Dir(filepath.Dir(goBinary)),
+		"GOTOOLCHAIN=local",
+		"GOENV=off",
+	}
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	path, err := filepath.EvalSymlinks(strings.TrimSpace(string(output)))
+	if err != nil || !filepath.IsAbs(path) || path == string(filepath.Separator) ||
+		!strings.HasSuffix(filepath.Clean(path), filepath.Join("pkg", "mod")) {
+		return "", errors.New("go module cache is unsafe")
+	}
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {
-		return ""
+		return "", errors.New("go module cache is unavailable")
 	}
-	return path
+	return path, nil
+}
+
+func goModuleMountArgs(mounts []goModuleMount) []string {
+	directories := map[string]bool{}
+	for _, mount := range mounts {
+		for parent := filepath.Dir(mount.target); parent != "/gomodcache" && parent != string(filepath.Separator); parent = filepath.Dir(parent) {
+			directories[parent] = true
+		}
+	}
+	ordered := make([]string, 0, len(directories))
+	for directory := range directories {
+		ordered = append(ordered, directory)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		leftDepth := strings.Count(ordered[i], "/")
+		rightDepth := strings.Count(ordered[j], "/")
+		if leftDepth == rightDepth {
+			return ordered[i] < ordered[j]
+		}
+		return leftDepth < rightDepth
+	})
+	args := make([]string, 0, len(ordered)*2+len(mounts)*3)
+	for _, directory := range ordered {
+		args = append(args, "--dir", directory)
+	}
+	for _, mount := range mounts {
+		args = append(args, "--ro-bind", mount.source, mount.target)
+	}
+	return args
 }
 
 func controlledWorkspaceState(ctx context.Context, root string) (string, error) {

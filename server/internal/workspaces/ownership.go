@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// AuthorizeAgent 校验 Agent 对相对路径的写入范围。
 func (s *Service) AuthorizeAgent(ctx context.Context, agent string, taskID, stepID int64, relativePath string) error {
 	if agent == "" || relativePath == "" || filepath.IsAbs(relativePath) || strings.Contains(relativePath, "\\") {
 		return errors.New("invalid assignment scope")

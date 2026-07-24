@@ -24,10 +24,12 @@ type Service struct {
 	chatter AgentChatter
 }
 
+// NewService 创建任务规划服务。
 func NewService(cfg config.Config, db *sql.DB, chatter AgentChatter) *Service {
 	return &Service{cfg: cfg, db: db, chatter: chatter}
 }
 
+// PlanTask 调用 Manager 生成并持久化初版计划。
 func (s *Service) PlanTask(ctx context.Context, taskID int64) (Plan, error) {
 	task, err := s.loadTask(ctx, taskID)
 	if err != nil {
@@ -73,6 +75,7 @@ func (s *Service) PlanTask(ctx context.Context, taskID int64) (Plan, error) {
 	return plan, nil
 }
 
+// PlanRework 结合验收反馈生成并持久化返工计划。
 func (s *Service) PlanRework(ctx context.Context, taskID, version int64, reason string) (Plan, error) {
 	task, err := s.loadTask(ctx, taskID)
 	if err != nil {

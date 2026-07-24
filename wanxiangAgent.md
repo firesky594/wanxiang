@@ -550,7 +550,7 @@ next_action: 增加过期会话测试
 files_changed:
   - server/internal/auth/session.go
 tests:
-  - command: go test ./internal/auth
+  - command: cd server && ./test/run.sh ./internal/auth
     result: passed
 decisions:
   - 会话过期时间由服务端计算
@@ -670,7 +670,9 @@ risks:
 - `server/**/*.go`、`server/go.mod`、`server/go.sum`、数据库迁移、后端运行环境或 PM2 配置。
 - 前端依赖的 API 契约发生变化，需要后端新版本才能工作。
 
-命中任一条件时必须先运行 `go test ./...` 和 `go build -o wanxiang ./cmd/wanxiang`。只有测试和构建通过后，才能替换运行中的后端二进制。
+命中任一条件时必须进入 `server/`，先运行 `./test/run.sh ./...` 和
+`go build -o /tmp/wanxiang-agent-verify ./cmd/wanxiang`。只有测试和构建通过后，
+才能替换运行中的后端二进制。
 
 生产后端只能由仓库 `deploy/pm2/ecosystem.config.cjs` 定义的 PM2 应用 `wanxiang-agent` 管理。不得使用 `nohup`、手工后台进程或 systemd 同时启动第二份生产后端；开发环境的 `go run` 不得占用生产监听地址。
 
@@ -689,7 +691,7 @@ frontend_build_result: passed
 frontend_dist_path: web/dist
 frontend_deployed: false
 backend_build_required: true
-backend_build_command: go test ./... && go build -o wanxiang ./cmd/wanxiang
+backend_build_command: cd server && ./test/run.sh ./... && go build -o /tmp/wanxiang-agent-verify ./cmd/wanxiang
 backend_build_result: passed
 backend_restart_required: true
 backend_restarted: false

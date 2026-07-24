@@ -14,6 +14,7 @@ const planSchemaInstruction = `Return one JSON object only with this shape:
 {"summary":"string","requires_project_lead":false,"work_items":[{"key":"lowercase-id","title":"string","description":"string","kind":"backend|frontend|qa|docs|security|deployment","required_capabilities":["string"],"required_skills":["string"],"required_mcps":["string"],"acceptance_criteria":["observable result"],"depends_on":["work-item-key"]}]}
 Every work item needs at least one acceptance_criteria entry. depends_on may only reference keys in work_items. Do not include markdown fences, credentials, or extra fields.`
 
+// BuildMessages 组装 Manager 任务规划模型消息。
 func BuildMessages(managerDir string, task tasks.Task) ([]providers.Message, error) {
 	content, err := os.ReadFile(filepath.Join(managerDir, "system_prompt.md"))
 	if err != nil {

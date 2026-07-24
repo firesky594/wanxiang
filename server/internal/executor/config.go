@@ -10,6 +10,7 @@ import (
 
 const maxAgentEnvBytes = 64 * 1024
 
+// CopyTestEnv 复制测试环境配置供回归测试使用。
 func CopyTestEnv(source, target string) error {
 	if source == "" || target == "" {
 		return errors.New("source and target env paths are required")

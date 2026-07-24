@@ -20,12 +20,15 @@ type Worker struct {
 	wg       sync.WaitGroup
 }
 
+// NewWorker 创建任务自动分配轮询器。
 func NewWorker(db *sql.DB, assigner TaskAssigner, interval time.Duration) *Worker {
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
 	return &Worker{db: db, assigner: assigner, interval: interval}
 }
+
+// Start 启动待分配任务轮询。
 func (w *Worker) Start() {
 	w.mu.Lock()
 	if w.cancel != nil {
@@ -51,6 +54,8 @@ func (w *Worker) Start() {
 		}
 	}()
 }
+
+// Close 停止分配轮询并等待退出。
 func (w *Worker) Close() {
 	w.mu.Lock()
 	cancel := w.cancel

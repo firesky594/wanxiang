@@ -23,6 +23,7 @@ type Service struct {
 	bus *events.Bus
 }
 
+// List 分页查询任务列表。
 func (s *Service) List(ctx context.Context, limit, offset int) ([]Task, error) {
 	limit, offset = normalizePagination(limit, offset)
 	rows, err := s.db.QueryContext(ctx, `select t.id,t.project_id,p.slug,t.title,t.description,t.status
@@ -42,6 +43,7 @@ func (s *Service) List(ctx context.Context, limit, offset int) ([]Task, error) {
 	return result, rows.Err()
 }
 
+// ListProjects 分页查询项目列表。
 func (s *Service) ListProjects(ctx context.Context, limit, offset int) ([]Project, error) {
 	limit, offset = normalizePagination(limit, offset)
 	rows, err := s.db.QueryContext(ctx, `select id,slug,dir,status,main_commit,remote_url,created_at from projects order by created_at desc,id desc limit ? offset ?`, limit, offset)
@@ -64,6 +66,7 @@ func (s *Service) ListProjects(ctx context.Context, limit, offset int) ([]Projec
 	return result, rows.Err()
 }
 
+// Get 查询任务、项目、步骤与依赖详情。
 func (s *Service) Get(ctx context.Context, id int64) (TaskDetail, error) {
 	var detail TaskDetail
 	var mainCommit sql.NullString
@@ -89,6 +92,7 @@ func (s *Service) Get(ctx context.Context, id int64) (TaskDetail, error) {
 	return detail, err
 }
 
+// UpdateStatus 校验状态机后更新任务状态并发布事件。
 func (s *Service) UpdateStatus(ctx context.Context, id int64, next, actor string) (Task, error) {
 	detail, err := s.Get(ctx, id)
 	if err != nil {
@@ -187,6 +191,7 @@ func validTransition(current, next string) bool {
 	return allowed[current][next]
 }
 
+// NewService 创建任务领域服务。
 func NewService(cfg config.Config, db *sql.DB, bus *events.Bus) *Service {
 	if bus == nil {
 		bus = events.NewBus(db)
@@ -194,10 +199,12 @@ func NewService(cfg config.Config, db *sql.DB, bus *events.Bus) *Service {
 	return &Service{cfg: cfg, db: db, bus: bus}
 }
 
+// CreateTask 按标题与描述创建新项目任务。
 func (s *Service) CreateTask(ctx context.Context, title, description string, actors ...string) (task Task, err error) {
 	return s.CreateTaskWithInput(ctx, CreateTaskInput{Title: title, Description: description}, actors...)
 }
 
+// CreateTaskWithInput 在新建或既有项目中事务化创建任务。
 func (s *Service) CreateTaskWithInput(ctx context.Context, input CreateTaskInput, actors ...string) (task Task, err error) {
 	if strings.TrimSpace(input.Title) == "" {
 		return Task{}, errors.New("task title is required")

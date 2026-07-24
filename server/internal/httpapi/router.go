@@ -34,6 +34,7 @@ type Dependencies struct {
 	Pipelines   *pipelines.Service
 }
 
+// NewRouter 注册并返回完整 HTTP API 路由。
 func NewRouter(deps Dependencies) http.Handler {
 	r := chi.NewRouter()
 	r.Post("/api/admin/login", handleAdminLogin(deps))

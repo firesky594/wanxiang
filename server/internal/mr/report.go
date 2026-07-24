@@ -10,6 +10,7 @@ import (
 	"wanxiang-agent/server/internal/events"
 )
 
+// SubmitReport 校验租约后提交完成报告并创建评审请求。
 func (s *Service) SubmitReport(ctx context.Context, principal Principal, input CompletionReportInput) (MRDetail, error) {
 	authorized, err := s.authorizeSubmission(ctx, principal, input)
 	if err != nil {

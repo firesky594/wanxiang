@@ -38,6 +38,7 @@ type App struct {
 	HTTP          httpapi.Dependencies
 }
 
+// New 装配数据库、领域服务、Worker 与 HTTP 依赖。
 func New(cfg config.Config) (*App, error) {
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, err
@@ -102,6 +103,7 @@ func New(cfg config.Config) (*App, error) {
 	}, nil
 }
 
+// Close 按依赖顺序停止 Worker 并关闭数据库。
 func (a *App) Close() error {
 	if a.Pipelines != nil {
 		a.Pipelines.Close()

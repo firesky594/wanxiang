@@ -55,6 +55,7 @@ type assignmentSource struct {
 	Item                 planning.WorkItem
 }
 
+// NewService 创建任务工作区服务。
 func NewService(cfg config.Config, db *sql.DB, bus *events.Bus) *Service {
 	if bus == nil {
 		bus = events.NewBus(db)
@@ -62,6 +63,7 @@ func NewService(cfg config.Config, db *sql.DB, bus *events.Bus) *Service {
 	return &Service{cfg: cfg, db: db, bus: bus, locks: map[int64]*sync.Mutex{}}
 }
 
+// ProvisionTask 创建分支、Worktree 与所有权元数据。
 func (s *Service) ProvisionTask(ctx context.Context, taskID int64) (workspace TaskWorkspace, err error) {
 	var projectID int64
 	var slug, projectDir, taskStatus string
@@ -185,6 +187,7 @@ func (s *Service) ProvisionTask(ctx context.Context, taskID int64) (workspace Ta
 	return s.GetTask(ctx, taskID)
 }
 
+// GetTask 查询任务工作区及各步骤状态。
 func (s *Service) GetTask(ctx context.Context, taskID int64) (TaskWorkspace, error) {
 	result := TaskWorkspace{TaskID: taskID, Items: []WorkspaceItem{}}
 	if err := s.db.QueryRowContext(ctx, `select p.id,p.slug from tasks t join projects p on p.id=t.project_id where t.id=?`, taskID).Scan(&result.ProjectID, &result.ProjectSlug); err != nil {

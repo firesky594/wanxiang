@@ -41,6 +41,7 @@ type mergeRecord struct {
 	ProjectDir   string
 }
 
+// NewService 创建合并请求领域服务。
 func NewService(cfg config.Config, db *sql.DB, bus *events.Bus, manager ManagerReadiness, blockers ...BlockChecker) *Service {
 	if bus == nil {
 		bus = events.NewBus(db)
@@ -52,6 +53,7 @@ func NewService(cfg config.Config, db *sql.DB, bus *events.Bus, manager ManagerR
 	return &Service{cfg: cfg, db: db, bus: bus, blocker: blocker, manager: manager}
 }
 
+// Create 创建基础合并请求并发布事件。
 func (s *Service) Create(ctx context.Context, projectID, taskID int64, title, sourceBranch, createdBy string) (MergeRequest, error) {
 	res, err := s.db.ExecContext(ctx, `insert into merge_requests(project_id,task_id,title,source_branch,target_branch,status,created_by,created_at) values(?,?,?,?,?,?,?,?)`,
 		projectID, taskID, title, sourceBranch, "main", "open", createdBy, time.Now().UTC().Format(time.RFC3339Nano))
@@ -68,6 +70,7 @@ func (s *Service) Create(ctx context.Context, projectID, taskID int64, title, so
 	return created, nil
 }
 
+// List 分页查询合并请求列表。
 func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([]MergeRequest, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20
@@ -99,6 +102,7 @@ func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([
 	return result, rows.Err()
 }
 
+// ManagerMerge 由 Manager 校验阻塞后合并主分支。
 func (s *Service) ManagerMerge(ctx context.Context, mrID int64, actor string) error {
 	if actor != "manager" {
 		return errors.New("only manager can merge main")
@@ -223,6 +227,7 @@ type databaseBlockChecker struct {
 	db *sql.DB
 }
 
+// HasBlockingForMR 查询数据库中的未解决阻塞问题。
 func (d databaseBlockChecker) HasBlockingForMR(ctx context.Context, mrID int64) (bool, error) {
 	var count int
 	err := d.db.QueryRowContext(ctx, `select count(*) from issues i

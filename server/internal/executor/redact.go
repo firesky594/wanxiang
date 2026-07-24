@@ -17,6 +17,7 @@ var secretPatterns = []struct {
 	{regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|passwd)\s*[:=]\s*)[^\s,;]+`), `${1}[REDACTED]`},
 }
 
+// Redact 脱敏文本中的密钥与令牌。
 func Redact(value string) string {
 	redacted := value
 	for _, pattern := range secretPatterns {

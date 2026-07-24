@@ -33,10 +33,12 @@ type CheckRunner struct {
 	leases LeaseAuthorizer
 }
 
+// NewCheckRunner 创建命令检查执行器。
 func NewCheckRunner(db *sql.DB, leaseService LeaseAuthorizer) *CheckRunner {
 	return &CheckRunner{db: db, leases: leaseService}
 }
 
+// RunCheck 校验租约后运行受限检查命令。
 func (r *CheckRunner) RunCheck(ctx context.Context, ref leases.LeaseRef, request CheckRequest) CheckResult {
 	result := CheckResult{Command: strings.TrimSpace(request.Command + " " + strings.Join(request.Args, " ")), ExitCode: -1}
 	if err := validateCheck(request); err != nil {

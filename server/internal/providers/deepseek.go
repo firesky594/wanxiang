@@ -12,8 +12,10 @@ import (
 
 type DeepSeek struct{ client *http.Client }
 
+// NewDeepSeek 创建 DeepSeek 模型客户端。
 func NewDeepSeek(client *http.Client) *DeepSeek { return &DeepSeek{client: client} }
 
+// Chat 调用 DeepSeek 对话接口并解析用量。
 func (p *DeepSeek) Chat(ctx context.Context, cfg Config, messages []Message, maxTokens int) (Result, error) {
 	if err := validateConfig(cfg); err != nil {
 		return Result{}, err

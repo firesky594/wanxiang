@@ -67,6 +67,7 @@ type CompletionReportInput struct {
 	UserDecision     string         `json:"user_decision"`
 }
 
+// Validate 校验完成报告身份、内容及大小限制。
 func (in CompletionReportInput) Validate() error {
 	if strings.TrimSpace(in.AgentName) == "" || strings.TrimSpace(in.Role) == "" || in.ProjectID <= 0 || in.TaskID <= 0 || in.StepID <= 0 || strings.TrimSpace(in.LeaseID) == "" || in.LeaseVersion <= 0 || strings.TrimSpace(in.SourceBranch) == "" || strings.TrimSpace(in.CheckpointCommit) == "" || strings.TrimSpace(in.HeadCommit) == "" {
 		return errors.New("invalid completion report identity")
@@ -111,6 +112,7 @@ type ReviewInput struct {
 	TakeoverReason string `json:"takeover_reason"`
 }
 
+// Validate 校验评审身份、状态与内容限制。
 func (in ReviewInput) Validate() error {
 	if strings.TrimSpace(in.AgentName) == "" || strings.TrimSpace(in.Role) == "" {
 		return errors.New("review identity is required")

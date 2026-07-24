@@ -8,6 +8,7 @@ import (
 	"wanxiang-agent/server/internal/db"
 )
 
+// OpenDB 打开并初始化临时测试数据库。
 func OpenDB(t *testing.T) *sql.DB {
 	t.Helper()
 	conn, err := db.Open(":memory:")

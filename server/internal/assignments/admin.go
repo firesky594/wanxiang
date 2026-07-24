@@ -30,6 +30,7 @@ type MatchView struct {
 	LeadReason   string         `json:"lead_reason,omitempty"`
 }
 
+// GetTaskMatch 查询任务匹配结果、候选人与负责人信息。
 func (s *Service) GetTaskMatch(ctx context.Context, taskID int64) (MatchView, error) {
 	var exists int
 	if err := s.db.QueryRowContext(ctx, `select count(*) from tasks where id=?`, taskID).Scan(&exists); err != nil {
@@ -80,6 +81,7 @@ func (s *Service) GetTaskMatch(ctx context.Context, taskID int64) (MatchView, er
 	return view, nil
 }
 
+// Override 人工覆盖步骤的 Agent 分配结果。
 func (s *Service) Override(ctx context.Context, taskID, stepID int64, agentName, actor string) error {
 	if agentName == "" || actor == "" {
 		return errors.New("agent_name and actor are required")

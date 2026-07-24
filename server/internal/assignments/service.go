@@ -42,8 +42,10 @@ type step struct {
 	item planning.WorkItem
 }
 
+// NewService 创建任务分配服务。
 func NewService(cfg config.Config, db *sql.DB) *Service { return &Service{cfg: cfg, db: db} }
 
+// AssignTask 匹配 Agent 并持久化任务步骤分配。
 func (s *Service) AssignTask(ctx context.Context, taskID int64) (Result, error) {
 	version, err := s.currentVersion(ctx, taskID)
 	if err != nil {

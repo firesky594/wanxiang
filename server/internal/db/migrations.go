@@ -6,6 +6,7 @@ import (
 	"fmt"
 )
 
+// Migrate 幂等创建并升级数据库结构。
 func Migrate(ctx context.Context, conn *sql.DB) error {
 	stmts := []string{
 		`create table if not exists users (id integer primary key, username text not null unique, password_hash text not null, created_at text not null)`,

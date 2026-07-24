@@ -20,10 +20,12 @@ type Launcher struct {
 	wg     sync.WaitGroup
 }
 
+// NewLauncher 创建并初始化 Agent 启动器。
 func NewLauncher(service *Service, bus *events.Bus) *Launcher {
 	return &Launcher{service: service, bus: bus, active: map[string]string{}}
 }
 
+// Start 探测 Manager 并启动持续心跳。
 func (l *Launcher) Start(ctx context.Context) (ManagerStatus, error) {
 	status, err := l.service.EnsureManager(ctx)
 	if err != nil || status.Status == "blocked: missing_secret" {
@@ -36,6 +38,7 @@ func (l *Launcher) Start(ctx context.Context) (ManagerStatus, error) {
 	return l.startHeartbeat(ctx, "manager", "manager", status)
 }
 
+// StartAll 启动 Manager 及全部已配置 Agent。
 func (l *Launcher) StartAll(ctx context.Context) (ManagerStatus, error) {
 	status, err := l.Start(ctx)
 	if err != nil {
@@ -56,6 +59,7 @@ func (l *Launcher) StartAll(ctx context.Context) (ManagerStatus, error) {
 	return status, nil
 }
 
+// StartAgent 探测并启动指定 Agent 的心跳。
 func (l *Launcher) StartAgent(ctx context.Context, name string) (AgentConfigView, error) {
 	view, err := l.service.ProbeAgent(ctx, name)
 	if err != nil {
@@ -122,6 +126,7 @@ func (l *Launcher) startHeartbeat(ctx context.Context, name, role string, status
 	return status, nil
 }
 
+// Close 停止全部 Agent 心跳并等待退出。
 func (l *Launcher) Close() {
 	l.mu.Lock()
 	cancel := l.cancel

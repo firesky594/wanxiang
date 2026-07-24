@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 )
 
+// Detail 按主体权限查询合并请求详情。
 func (s *Service) Detail(ctx context.Context, principal Principal, mrID int64) (MRDetail, error) {
 	detail, createdBy, err := s.loadDetail(ctx, mrID)
 	if err != nil {
@@ -17,6 +18,7 @@ func (s *Service) Detail(ctx context.Context, principal Principal, mrID int64) (
 	return detail, nil
 }
 
+// AdminList 分页查询合并请求完整明细。
 func (s *Service) AdminList(ctx context.Context, taskID *int64, limit, offset int) ([]MRDetail, error) {
 	items, err := s.List(ctx, taskID, limit, offset)
 	if err != nil {
@@ -33,11 +35,13 @@ func (s *Service) AdminList(ctx context.Context, taskID *int64, limit, offset in
 	return result, nil
 }
 
+// AdminDetail 后台查询单个合并请求完整明细。
 func (s *Service) AdminDetail(ctx context.Context, mrID int64) (MRDetail, error) {
 	detail, _, err := s.loadDetail(ctx, mrID)
 	return detail, err
 }
 
+// ListNotifications 分页查询负责人交付通知。
 func (s *Service) ListNotifications(ctx context.Context, limit, offset int) ([]ManagerNotification, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20

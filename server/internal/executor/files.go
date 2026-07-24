@@ -28,10 +28,12 @@ type FileTools struct {
 	leases LeaseAuthorizer
 }
 
+// NewFileTools 创建受租约保护的文件工具。
 func NewFileTools(db *sql.DB, leaseService LeaseAuthorizer) *FileTools {
 	return &FileTools{db: db, leases: leaseService}
 }
 
+// ReadFile 鉴权并读取工作区相对文件。
 func (t *FileTools) ReadFile(ctx context.Context, ref leases.LeaseRef, relativePath string) ([]byte, error) {
 	target, err := t.authorizePath(ctx, ref, relativePath)
 	if err != nil {
@@ -62,6 +64,7 @@ func (t *FileTools) ReadFile(ctx context.Context, ref leases.LeaseRef, relativeP
 	return content, nil
 }
 
+// WriteFile 鉴权并原子写入工作区相对文件。
 func (t *FileTools) WriteFile(ctx context.Context, ref leases.LeaseRef, relativePath string, content []byte) error {
 	if len(content) > maxWriteBytes {
 		return errors.New("content exceeds write limit")

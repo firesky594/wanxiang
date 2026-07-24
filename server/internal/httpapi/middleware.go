@@ -25,6 +25,7 @@ type AgentPrincipalValue struct {
 	Role string
 }
 
+// RequireAdmin 创建管理员 Cookie 鉴权中间件。
 func RequireAdmin(db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +59,7 @@ func clearAdminSessionCookie(w http.ResponseWriter) {
 	})
 }
 
+// RequireAgent 创建 Agent Bearer 鉴权中间件。
 func RequireAgent(db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,16 +74,19 @@ func RequireAgent(db *sql.DB) func(http.Handler) http.Handler {
 	}
 }
 
+// AdminIdentity 从请求上下文读取管理员身份。
 func AdminIdentity(ctx context.Context) (string, bool) {
 	username, ok := ctx.Value(adminIdentityKey).(string)
 	return username, ok && username != ""
 }
 
+// AgentIdentity 从请求上下文读取 Agent 名称。
 func AgentIdentity(ctx context.Context) (string, bool) {
 	principal, ok := AgentPrincipal(ctx)
 	return principal.Name, ok
 }
 
+// AgentPrincipal 从请求上下文读取 Agent 主体信息。
 func AgentPrincipal(ctx context.Context) (AgentPrincipalValue, bool) {
 	principal, ok := ctx.Value(agentIdentityKey).(AgentPrincipalValue)
 	return principal, ok && principal.Name != "" && principal.Role != ""

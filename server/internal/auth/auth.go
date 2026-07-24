@@ -23,17 +23,20 @@ const (
 	maxHashIterations  = 10_000_000
 )
 
+// HashSecret 计算密钥的 SHA-256 标识。
 func HashSecret(secret string) string {
 	sum := sha256.Sum256([]byte(secret))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// VerifySecret 常量时间校验密钥哈希。
 func VerifySecret(secret, hash string) bool {
 	actual := []byte(HashSecret(secret))
 	expected := []byte(hash)
 	return len(actual) == len(expected) && subtle.ConstantTimeCompare(actual, expected) == 1
 }
 
+// HashPassword 使用 PBKDF2 生成带盐密码哈希。
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, passwordSaltSize)
 	if _, err := rand.Read(salt); err != nil {
@@ -44,6 +47,7 @@ func HashPassword(password string) (string, error) {
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
 
+// VerifyPassword 校验 PBKDF2 编码密码。
 func VerifyPassword(password, encoded string) (bool, error) {
 	if strings.HasPrefix(encoded, "sha256:") {
 		return VerifySecret(password, encoded), nil
@@ -56,6 +60,7 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	return subtle.ConstantTimeCompare(actual, expected) == 1, nil
 }
 
+// PasswordNeedsRehash 判断密码哈希参数是否需要升级。
 func PasswordNeedsRehash(encoded string) bool {
 	iterations, salt, key, err := parsePasswordHash(encoded)
 	return err != nil || iterations != passwordIterations || len(salt) != passwordSaltSize || len(key) != passwordKeySize

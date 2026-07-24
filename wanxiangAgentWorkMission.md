@@ -181,3 +181,57 @@ frontend_assets:
 backend_pm2_status: online
 backend_healthcheck: '{"ok":true}'
 ```
+
+## 后端规范、函数索引与测试归类
+
+### 执行范围
+
+1. 补全 `server/rules.md`，覆盖 Go 包职责、接口鉴权、数据库事务、并发任务、
+   文件与命令安全、日志密钥、测试和 PM2 部署。
+2. `server/server_func_doc.md` 只登记后端项目自定义且可跨文件复用的导出函数与方法，
+   不记录 Go 标准库、Chi、SQLite 等框架或依赖方法。
+3. 将现有后端测试源文件集中归类到 `server/test/`。
+4. 同包白盒测试通过受控测试运行器以 Go overlay 虚拟映射回原包执行，
+   不向源码目录写入测试文件，结束后自动清理临时 overlay 配置。
+5. 保持 `wanxiang-agent` 在线，完成后执行全部后端测试、构建与健康检查。
+
+### 当前状态
+
+```yaml
+source_scope: server
+baseline_test_files: 66
+baseline_test_lines: 6652
+baseline_go_test: passed
+test_directory: server/test
+server_rules: server/rules.md
+function_document: server/server_func_doc.md
+temporary_tests_allowed: false
+backend_pm2_status_before_change: online
+status: 已完成
+```
+
+### 执行结果
+
+```yaml
+exported_functions_and_methods: 196
+documented_functions_and_methods: 188
+excluded_test_helpers_and_accessors: 8
+chinese_go_doc_comments: 196
+archived_baseline_test_files: 66
+permanent_runner_guard_tests: 1
+test_archive_path: server/test/testdata
+test_runner: server/test/run.sh
+test_transport: go_overlay
+source_directory_test_files: 0
+temporary_overlay_files_remaining: 0
+test_archive_content_mismatches: 0
+bare_go_test_guard: passed_by_expected_rejection
+backend_tests: passed_66_archived_files_and_guard
+backend_build: passed
+backend_build_path: /tmp/wanxiang-agent-verify
+backend_build_sha256: b122368a6835a3bcc899fed7e2e5f2a01fb0078202cdb44722387955ada19f56
+backend_restart_required: false
+backend_restart_reason: 仅注释、规范、函数索引与测试归档发生变化
+backend_pm2_status: online
+backend_healthcheck: '{"ok":true}'
+```

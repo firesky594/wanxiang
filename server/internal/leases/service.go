@@ -23,6 +23,7 @@ type Service struct {
 	workspaces WorkspaceAuthorizer
 }
 
+// NewService 创建租约生命周期服务。
 func NewService(db *sql.DB, clock Clock, workspaces WorkspaceAuthorizer) *Service {
 	if clock == nil {
 		clock = SystemClock{}
@@ -30,6 +31,7 @@ func NewService(db *sql.DB, clock Clock, workspaces WorkspaceAuthorizer) *Servic
 	return &Service{db: db, clock: clock, workspaces: workspaces}
 }
 
+// Acquire 为已分配步骤签发活动租约。
 func (s *Service) Acquire(ctx context.Context, taskID, stepID int64, agent string) (Lease, error) {
 	if taskID <= 0 || stepID <= 0 || agent == "" {
 		return Lease{}, ErrConflict
@@ -99,6 +101,7 @@ func (s *Service) Acquire(ctx context.Context, taskID, stepID int64, agent strin
 	return Lease{LeaseRef: LeaseRef{TaskID: taskID, StepID: stepID, AgentName: agent, LeaseID: leaseID, LeaseVersion: version}, Status: LeaseActive, AcquiredAt: now, ExpiresAt: expires, LastHeartbeatAt: &heartbeat}, nil
 }
 
+// Heartbeat 续期活动租约并更新步骤心跳。
 func (s *Service) Heartbeat(ctx context.Context, ref LeaseRef) (Lease, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

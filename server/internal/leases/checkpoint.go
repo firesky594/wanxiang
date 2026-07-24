@@ -33,6 +33,7 @@ type CheckpointInput struct {
 	HighRisk       bool             `json:"high_risk"`
 }
 
+// CreateCheckpoint 校验租约与 Git 状态后持久化检查点。
 func (s *Service) CreateCheckpoint(ctx context.Context, ref LeaseRef, input CheckpointInput) (Checkpoint, error) {
 	if err := s.validateActiveRef(ctx, ref); err != nil {
 		return Checkpoint{}, err
@@ -111,6 +112,7 @@ func (s *Service) CreateCheckpoint(ctx context.Context, ref LeaseRef, input Chec
 	return Checkpoint{ID: id, TaskID: ref.TaskID, StepID: ref.StepID, LeaseID: ref.LeaseID, IdempotencyKey: input.IdempotencyKey, GitCommit: input.GitCommit, BranchName: input.BranchName, Clean: input.Clean, SummaryHash: hash, HighRisk: input.HighRisk, CreatedAt: now}, nil
 }
 
+// GetCheckpoint 按编号查询检查点基础信息。
 func (s *Service) GetCheckpoint(ctx context.Context, checkpointID int64) (Checkpoint, error) {
 	return scanCheckpoint(s.db.QueryRowContext(ctx, `select id,task_id,step_id,lease_id,idempotency_key,git_commit,branch_name,clean,summary_hash,high_risk,created_at from task_checkpoints where id=?`, checkpointID))
 }

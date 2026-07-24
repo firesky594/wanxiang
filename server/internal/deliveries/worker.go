@@ -18,6 +18,7 @@ type Worker struct {
 	rework   func(context.Context, int64, int64, string) error
 }
 
+// NewWorker 创建交付快照轮询器。
 func NewWorker(db *sql.DB, service *Service, interval time.Duration, rework ...func(context.Context, int64, int64, string) error) *Worker {
 	if interval <= 0 {
 		interval = 2 * time.Second
@@ -28,6 +29,8 @@ func NewWorker(db *sql.DB, service *Service, interval time.Duration, rework ...f
 	}
 	return w
 }
+
+// Start 启动交付通知扫描。
 func (w *Worker) Start() {
 	go func() {
 		defer close(w.done)
@@ -43,7 +46,11 @@ func (w *Worker) Start() {
 		}
 	}()
 }
+
+// Close 停止交付扫描并等待退出。
 func (w *Worker) Close() { w.once.Do(func() { close(w.stop); <-w.done }) }
+
+// Scan 处理待办通知并生成快照或触发返工。
 func (w *Worker) Scan(ctx context.Context) error {
 	now := time.Now().UTC()
 	staleNotification := now.Add(-5 * time.Minute).Format(time.RFC3339Nano)

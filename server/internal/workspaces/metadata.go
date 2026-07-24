@@ -42,6 +42,7 @@ type AssignmentMetadata struct {
 var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 var safeKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
+// EncodeProject 校验并编码项目元数据 YAML。
 func EncodeProject(value ProjectMetadata) ([]byte, error) {
 	if value.MetadataVersion != 1 || !safeName.MatchString(value.Project) || !safeName.MatchString(value.Manager) {
 		return nil, errors.New("invalid project metadata")
@@ -64,6 +65,7 @@ func EncodeProject(value ProjectMetadata) ([]byte, error) {
 	return []byte(out.String()), nil
 }
 
+// EncodeAssignment 校验并编码分配元数据及摘要。
 func EncodeAssignment(value AssignmentMetadata) ([]byte, string, error) {
 	if err := validateAssignment(value); err != nil {
 		return nil, "", err
@@ -79,6 +81,7 @@ func EncodeAssignment(value AssignmentMetadata) ([]byte, string, error) {
 	return encoded, hex.EncodeToString(sum[:]), nil
 }
 
+// DecodeAssignment 解析并校验分配元数据 YAML。
 func DecodeAssignment(content []byte) (AssignmentMetadata, error) {
 	var result AssignmentMetadata
 	seen := map[string]bool{}

@@ -2,6 +2,7 @@ package leases
 
 import "context"
 
+// Authorize 校验活动租约及工作区路径权限。
 func (s *Service) Authorize(ctx context.Context, ref LeaseRef, relativePath string) error {
 	lease, err := loadLease(ctx, s.db, ref.LeaseID)
 	if err != nil || !sameRef(lease.LeaseRef, ref) || lease.Status != LeaseActive || !s.clock.Now().UTC().Before(lease.ExpiresAt) {

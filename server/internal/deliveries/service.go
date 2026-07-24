@@ -20,6 +20,7 @@ type Service struct {
 	bus *events.Bus
 }
 
+// NewService 创建交付快照服务。
 func NewService(db *sql.DB, buses ...*events.Bus) *Service {
 	var bus *events.Bus
 	if len(buses) > 0 {
@@ -28,6 +29,7 @@ func NewService(db *sql.DB, buses ...*events.Bus) *Service {
 	return &Service{db: db, bus: bus}
 }
 
+// BuildSnapshot 汇总通知、合并请求与证据生成交付快照。
 func (s *Service) BuildSnapshot(ctx context.Context, notificationID int64) (Snapshot, error) {
 	if existing, err := s.snapshotByNotification(ctx, notificationID); err == nil {
 		return existing, nil
@@ -361,6 +363,7 @@ func sanitizeValue(value any) any {
 	}
 }
 
+// List 分页查询交付快照。
 func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([]Snapshot, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20
@@ -393,6 +396,8 @@ func (s *Service) List(ctx context.Context, taskID *int64, limit, offset int) ([
 	}
 	return items, rows.Err()
 }
+
+// Detail 查询交付快照及关联明细。
 func (s *Service) Detail(ctx context.Context, id int64) (Detail, error) {
 	snap, err := s.loadSnapshot(ctx, `where id=?`, id)
 	if err != nil {
@@ -424,6 +429,8 @@ func (s *Service) Detail(ctx context.Context, id int64) (Detail, error) {
 	}
 	return detail, nil
 }
+
+// ListRework 查询任务的返工轮次记录。
 func (s *Service) ListRework(ctx context.Context, taskID int64) ([]ReworkRound, error) {
 	rows, err := s.db.QueryContext(ctx, `select id,task_id,source_snapshot_id,decision_id,round,plan_version,reason,status,last_error,created_by,created_at from rework_rounds where task_id=? order by round`, taskID)
 	if err != nil {

@@ -14,6 +14,7 @@ const (
 	RunStopped      RunStatus = "stopped"
 )
 
+// Valid 校验执行状态是否合法。
 func (s RunStatus) Valid() bool {
 	switch s {
 	case RunStarting, RunRunning, RunCheckpointed, RunCompleted, RunInterrupted, RunFailed, RunStopped:
@@ -33,6 +34,7 @@ const (
 	ActionCheckpoint ActionType = "checkpoint"
 )
 
+// Valid 校验动作类型是否合法。
 func (a ActionType) Valid() bool {
 	switch a {
 	case ActionReadFile, ActionWriteFile, ActionRunCheck, ActionGitStatus, ActionCheckpoint:

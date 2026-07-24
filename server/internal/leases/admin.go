@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// ExtendResumeDeadline 延长中断租约的恢复截止时间。
 func (s *Service) ExtendResumeDeadline(ctx context.Context, ref LeaseRef, deadline time.Time, actor string) (Lease, error) {
 	now := s.clock.Now().UTC()
 	deadline = deadline.UTC()
@@ -49,6 +50,7 @@ func (s *Service) ExtendResumeDeadline(ctx context.Context, ref LeaseRef, deadli
 	return lease, nil
 }
 
+// FreezeStep 冻结步骤租约并阻塞任务步骤。
 func (s *Service) FreezeStep(ctx context.Context, taskID, stepID int64, actor, reason string) error {
 	if actor == "" || taskID <= 0 || stepID <= 0 {
 		return ErrConflict
@@ -86,6 +88,7 @@ func (s *Service) FreezeStep(ctx context.Context, taskID, stepID int64, actor, r
 	return tx.Commit()
 }
 
+// UnfreezeStep 解冻步骤并签发新版活动租约。
 func (s *Service) UnfreezeStep(ctx context.Context, taskID, stepID int64, actor string) (Lease, error) {
 	if actor == "" {
 		return Lease{}, ErrConflict

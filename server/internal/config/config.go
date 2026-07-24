@@ -15,6 +15,7 @@ type Config struct {
 	HTTPAddr   string
 }
 
+// Load 从根目录与环境变量加载服务配置。
 func Load(root string) (Config, error) {
 	if root == "" {
 		return Config{}, errors.New("root directory is required")

@@ -18,6 +18,7 @@ const (
 	LeaseRevoked     LeaseStatus = "revoked"
 )
 
+// Valid 校验租约状态是否合法。
 func (s LeaseStatus) Valid() bool {
 	switch s {
 	case LeaseActive, LeaseInterrupted, LeaseFrozen, LeaseExpired, LeaseRevoked:
@@ -54,6 +55,7 @@ type PublicLease struct {
 	ExpiresAt    time.Time   `json:"expires_at"`
 }
 
+// PublicFor 按查看者隐藏非本人租约凭据。
 func (l Lease) PublicFor(agentName string) PublicLease {
 	view := PublicLease{TaskID: l.TaskID, StepID: l.StepID, Status: l.Status, ExpiresAt: l.ExpiresAt}
 	if agentName == l.AgentName {

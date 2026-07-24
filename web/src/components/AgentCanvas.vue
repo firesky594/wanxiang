@@ -9,6 +9,7 @@
       :nodes-connectable="false"
       :edges-updatable="false"
       :delete-key-code="null"
+      @node-click="selectAgentFromNode"
       @node-drag-stop="persistNodePosition"
     >
       <template #node-agent="{ data, selected }">
@@ -16,6 +17,11 @@
           class="agent-pod"
           :class="[`tone-${data.tone}`, { selected, connected: data.connected }]"
           :data-agent-name="data.agent.name"
+          role="button"
+          tabindex="0"
+          :aria-label="`查看 ${data.agent.name} 配置信息，${data.connected ? '已连接' : '未连接'}`"
+          @keydown.enter.prevent="selectAgent(data.agent)"
+          @keydown.space.prevent="selectAgent(data.agent)"
         >
           <header class="agent-pod__head">
             <strong :title="data.agent.name">{{ data.agent.name }}</strong>
@@ -24,10 +30,11 @@
               :class="{ connected: data.connected }"
               :aria-label="data.connected ? '已连接' : '未连接'"
               :title="data.connected ? '已连接' : '未连接'"
+              role="status"
             ></span>
           </header>
 
-          <div class="agent-portrait" aria-hidden="true">
+          <div class="agent-portrait">
             <span class="agent-orbit orbit-one"></span>
             <span class="agent-orbit orbit-two"></span>
             <img
@@ -62,7 +69,7 @@
 
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import { VueFlow, type Node, type NodeDragEvent } from '@vue-flow/core'
+import { VueFlow, type Node, type NodeDragEvent, type NodeMouseEvent } from '@vue-flow/core'
 import '@vue-flow/core/dist/style.css'
 import type { AgentConfig } from '../api/client'
 import agentAvatar from '../assets/agent-avatar.svg'
@@ -92,8 +99,23 @@ const props = defineProps<{
   loading?: boolean
 }>()
 
+const emit = defineEmits<{
+  'select-agent': [agent: AgentConfig]
+}>()
+
 const nodes = ref<Node<AgentNodeData>[]>([])
 const flowVersion = ref(0)
+
+/** 向父级发送用户选择的 Agent。 */
+function selectAgent(agent: AgentConfig) {
+  emit('select-agent', agent)
+}
+
+/** 将 Vue Flow 节点点击转换为 Agent 选择事件。 */
+function selectAgentFromNode({ node }: NodeMouseEvent) {
+  const data = node.data as AgentNodeData
+  if (data?.agent) selectAgent(data.agent)
+}
 
 /** 判断 Agent 原始状态是否代表当前可连接。 */
 function isConnectedStatus(status: string) {
@@ -165,6 +187,7 @@ function syncAgentNodes(keepCurrentPosition = true) {
   nodes.value = props.agents.map((agent, index) => ({
     id: `agent:${agent.name}`,
     type: 'agent',
+    ariaLabel: `${agent.name} Agent，${formatAgentStatus(agent.status)}，可拖动调整位置`,
     position: keepCurrentPosition
       ? current.get(agent.name) || saved[agent.name] || defaultPosition(index)
       : defaultPosition(index),
@@ -297,6 +320,12 @@ defineExpose({ resetLayout })
     0 0 0 3px var(--agent-accent-soft),
     0 28px 64px rgba(0, 0, 0, 0.42);
   transform: translateY(-3px);
+}
+
+.agent-pod:focus-visible {
+  border-color: var(--agent-accent);
+  outline: 3px solid var(--agent-accent-soft);
+  outline-offset: 4px;
 }
 
 .tone-cyan {

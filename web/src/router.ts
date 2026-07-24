@@ -26,7 +26,7 @@ export const router = createRouter({
     { path: '/bootstrap', component: AdminAccess, meta: { public: true } },
     { path: '/init-manager', redirect: '/agents' },
     { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { workspace: true, navTitle: '调度台', navIcon: 'dashboard', navOrder: 10 } },
-    { path: '/agents', name: 'agents', component: Agents, meta: { workspace: true, navTitle: 'Agents', navIcon: 'agents', navOrder: 20 } },
+    { path: '/agents', name: 'agents', component: Agents, meta: { workspace: true, navTitle: 'Agents', navIcon: 'agents' } },
     { path: '/tasks/:id', name: 'task-detail', component: TaskDetail, meta: { workspace: true } },
     { path: '/mrs', name: 'merge-requests', component: MergeRequests, meta: { workspace: true, navTitle: 'MR', navIcon: 'merge-requests', navOrder: 30 } },
     { path: '/deliveries', name: 'deliveries', component: Deliveries, meta: { workspace: true, navTitle: '交付验收', navIcon: 'deliveries', navOrder: 40 } },

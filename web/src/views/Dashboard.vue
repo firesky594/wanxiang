@@ -4,10 +4,11 @@
       ref="agentCanvas"
       :agents="agents"
       :loading="agentsLoading && agents.length === 0"
+      @select-agent="openAgentConfig"
     />
 
     <header class="canvas-title">
-      <span class="canvas-kicker">LIVE ORCHESTRATION / R005</span>
+      <span class="canvas-kicker">LIVE ORCHESTRATION / R006</span>
       <h1>任务调度台</h1>
       <p>
         <strong>{{ connectedAgentCount }}</strong> 个 Agent 已连接
@@ -28,19 +29,19 @@
         @click="refreshAgents(true)"
       >
         <el-icon><Refresh /></el-icon>
-        刷新
+        <span class="toolbar-label">刷新</span>
       </el-button>
       <el-button plain aria-label="重置 Agent 画布位置" @click="resetAgentLayout">
         <el-icon><Aim /></el-icon>
-        重置布局
+        <span class="toolbar-label">重置布局</span>
       </el-button>
-      <el-button plain @click="openTaskList">
+      <el-button plain aria-label="打开任务列表" @click="openTaskList">
         <el-icon><Tickets /></el-icon>
-        任务列表
+        <span class="toolbar-label">任务列表</span>
       </el-button>
-      <el-button type="primary" @click="openTaskComposer">
+      <el-button type="primary" aria-label="新建任务" @click="openTaskComposer">
         <el-icon><Plus /></el-icon>
-        新建任务
+        <span class="toolbar-label">新建任务</span>
       </el-button>
     </div>
 
@@ -55,12 +56,20 @@
 
     <el-drawer
       v-model="drawerOpen"
-      class="task-drawer"
+      class="control-drawer"
       :title="drawerTitle"
-      size="min(430px, 94vw)"
+      :size="drawerSize"
       append-to-body
+      destroy-on-close
+      @closed="handleDrawerClosed"
     >
-      <div v-if="drawerMode === 'create'" class="task-composer">
+      <AgentConfigPanel
+        v-if="drawerMode === 'agent'"
+        :agent="selectedAgent"
+        @updated="handleAgentConfigUpdated"
+      />
+
+      <div v-else-if="drawerMode === 'create'" class="task-composer">
         <p>提交任务后，总管会创建或复用隔离项目并进入调度流程。</p>
         <el-input v-model="taskTitle" placeholder="任务标题" />
         <el-input
@@ -110,9 +119,20 @@
         </el-alert>
       </div>
 
-      <div v-else class="task-list">
+      <div
+        v-else-if="drawerMode === 'tasks'"
+        v-loading="tasks.loading"
+        class="task-list"
+      >
+        <el-alert
+          v-if="tasks.error"
+          :title="tasks.error"
+          type="error"
+          :closable="false"
+          show-icon
+        />
         <el-empty
-          v-if="!tasks.loading && tasks.tasks.length === 0"
+          v-if="!tasks.loading && !tasks.error && tasks.tasks.length === 0"
           description="尚无持久任务"
         />
         <RouterLink
@@ -148,10 +168,11 @@ import {
   type Task
 } from '../api/client'
 import AgentCanvas from '../components/AgentCanvas.vue'
+import AgentConfigPanel from '../components/AgentConfigPanel.vue'
 import { useEventsStore } from '../stores/events'
 import { useTasksStore } from '../stores/tasks'
 
-type DrawerMode = 'create' | 'tasks'
+type DrawerMode = 'agent' | 'create' | 'tasks'
 
 const events = useEventsStore()
 const tasks = useTasksStore()
@@ -168,13 +189,27 @@ const projectMode = ref<'new' | 'existing'>('new')
 const selectedProjectID = ref<number>()
 const drawerOpen = ref(false)
 const drawerMode = ref<DrawerMode>('create')
+const selectedAgentName = ref('')
+const drawerSize = ref(430)
 let agentRefreshTimer: number | undefined
 
-const drawerTitle = computed(() =>
-  drawerMode.value === 'create' ? '创建新的调度任务' : '持久任务')
+const selectedAgent = computed(() =>
+  agents.value.find((agent) => agent.name === selectedAgentName.value) || null)
+
+const drawerTitle = computed(() => {
+  if (drawerMode.value === 'agent') {
+    return selectedAgent.value ? `Agent 配置 · ${selectedAgent.value.name}` : 'Agent 配置'
+  }
+  return drawerMode.value === 'create' ? '创建新的调度任务' : '持久任务'
+})
 
 const connectedAgentCount = computed(() =>
   agents.value.filter((agent) => ['online', 'busy'].includes(agent.status.trim().toLowerCase())).length)
+
+/** 将抽屉宽度同步为 Element Plus 可解析的响应式像素值。 */
+function syncDrawerSize() {
+  drawerSize.value = Math.min(430, Math.floor(window.innerWidth * 0.94))
+}
 
 /** 拉取最新 Agent 列表并刷新连接状态。 */
 async function refreshAgents(showFeedback = false) {
@@ -210,6 +245,7 @@ async function loadDashboardData() {
 /** 打开新建任务抽屉并清除上一次成功结果。 */
 function openTaskComposer() {
   drawerMode.value = 'create'
+  selectedAgentName.value = ''
   createdTask.value = null
   drawerOpen.value = true
 }
@@ -217,7 +253,28 @@ function openTaskComposer() {
 /** 打开持久任务抽屉。 */
 function openTaskList() {
   drawerMode.value = 'tasks'
+  selectedAgentName.value = ''
   drawerOpen.value = true
+  void tasks.loadList().catch((error) => {
+    agentError.value = error instanceof Error ? error.message : '任务列表加载失败'
+  })
+}
+
+/** 打开用户所选 Agent 的脱敏配置与编辑面板。 */
+function openAgentConfig(agent: AgentConfig) {
+  selectedAgentName.value = agent.name
+  drawerMode.value = 'agent'
+  drawerOpen.value = true
+}
+
+/** Agent 配置操作结束后重新同步画布状态。 */
+async function handleAgentConfigUpdated() {
+  await refreshAgents()
+}
+
+/** 抽屉关闭后清除 Agent 选择，避免保留密钥输入组件。 */
+function handleDrawerClosed() {
+  if (drawerMode.value === 'agent') selectedAgentName.value = ''
 }
 
 /** 清除用户保存的位置并恢复 Agent 默认布局。 */
@@ -251,12 +308,15 @@ async function createTask() {
 }
 
 onMounted(async () => {
+  syncDrawerSize()
+  window.addEventListener('resize', syncDrawerSize)
   await loadDashboardData()
   agentRefreshTimer = window.setInterval(() => void refreshAgents(), 15_000)
 })
 
 onBeforeUnmount(() => {
   if (agentRefreshTimer !== undefined) window.clearInterval(agentRefreshTimer)
+  window.removeEventListener('resize', syncDrawerSize)
 })
 </script>
 
@@ -516,7 +576,7 @@ onBeforeUnmount(() => {
     display: none;
   }
 
-  .canvas-toolbar :deep(.el-button span:not(.el-icon)) {
+  .toolbar-label {
     display: none;
   }
 

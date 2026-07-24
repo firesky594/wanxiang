@@ -103,5 +103,16 @@ Vue Flow、浏览器 API 及框架生命周期回调不在此列。
 98. `web/src/views/Dashboard.vue` `refreshAgents`：刷新 Agent 列表、连接状态及错误信息。
 99. `web/src/views/Dashboard.vue` `loadDashboardData`：初始化任务、项目、Agent 与实时事件。
 100. `web/src/views/Dashboard.vue` `openTaskComposer`：打开新建任务抽屉并清除上次结果。
-101. `web/src/views/Dashboard.vue` `openTaskList`：打开持久任务列表抽屉。
+101. `web/src/views/Dashboard.vue` `openTaskList`：打开并刷新持久任务列表抽屉。
 102. `web/src/views/Dashboard.vue` `resetAgentLayout`：重置 Agent 画布布局并提示结果。
+103. `web/src/components/AgentCanvas.vue` `selectAgent`：向父级发送用户选择的 Agent。
+104. `web/src/components/AgentCanvas.vue` `selectAgentFromNode`：将画布节点点击转换为 Agent 选择。
+105. `web/src/components/AgentConfigPanel.vue` `isAgentConnected`：判断 Agent 是否处于已连接状态。
+106. `web/src/components/AgentConfigPanel.vue` `hydrateForm`：用脱敏配置初始化 Agent 编辑表单。
+107. `web/src/components/AgentConfigPanel.vue` `applyProviderDefault`：按 Provider 应用默认模型和地址。
+108. `web/src/components/AgentConfigPanel.vue` `save`：保存 Agent 配置并执行真实接口探测。
+109. `web/src/components/AgentConfigPanel.vue` `probe`：重新探测 Agent 接口并刷新状态。
+110. `web/src/views/Dashboard.vue` `syncDrawerSize`：同步 Element Plus 可解析的抽屉宽度。
+111. `web/src/views/Dashboard.vue` `openAgentConfig`：打开所选 Agent 的配置面板。
+112. `web/src/views/Dashboard.vue` `handleAgentConfigUpdated`：配置操作后刷新 Agent 状态。
+113. `web/src/views/Dashboard.vue` `handleDrawerClosed`：抽屉关闭后清除 Agent 选择。

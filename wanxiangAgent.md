@@ -113,6 +113,7 @@ Wanxiang Agent 解决四个问题：
 | 修改其他项目               | 禁止直接修改        | 经任务授权允许     | 禁止             | 禁止                     |
 | 合并单 Agent 项目分支      | 禁止                | 仅异常接管         | 兼任负责人时允许 | 禁止                     |
 | 合并多人项目分支           | 禁止                | 仅异常接管         | 允许             | 禁止                     |
+| 推送项目远端               | 只可提出请求        | 仅异常接管且只推送 `main` | 本地合并和验收后只推送 `main` | 禁止              |
 | 执行部署、删库、删除项目   | 允许                | 必须先取得用户确认 | 禁止             | 禁止                     |
 
 权限判断必须由 Go 服务、文件路径校验、Agent 身份和 Git 操作共同执行，不能只依赖提示词约束。
@@ -274,6 +275,12 @@ flowchart TD
 - 多 Agent 不得共享开发分支。
 - 多 Agent 同时开发时，应为每个 Agent 创建独立分支和独立 Git worktree，不能在同一目录反复切换分支。
 - 建议分支名：`agent/<agent-name>/<work-item>`。
+- 所有开发分支、checkpoint 分支和临时分支只保存在本地仓库与本地 worktree，不得在远端创建或更新。
+- 开发期间禁止执行 `git push -u origin <开发分支>`、`git push --all`、`git push --mirror`
+  或任何将非 `main` ref 推送到远端的命令。
+- 项目负责人必须先在本地审查和测试，再把开发分支合入本地 `main`。合并验收通过后，
+  只允许执行 `git push origin main:main`，将本地 `main` 推送到远端 `main`。
+- 合并完成后也不得补推开发分支。`git fetch` 只读取远端状态，可以用于同步远端 `main` 基线。
 - Agent 开始工作前应确认工作区干净，并记录起始提交。
 - 每个提交只包含该工作包相关修改。
 - Agent 不得强推、删除其他 Agent 分支或绕过合并审查。
@@ -308,27 +315,29 @@ sequenceDiagram
     participant L as 项目负责人
     participant A as 执行 Agent A
     participant B as 执行 Agent B
-    participant G as Project Git
+    participant G as 本地 Project Git
+    participant R as 远端 main
     participant U as 用户
 
     M->>L: 下发项目目标 依赖图和 Agent 名单
     L->>A: 分配工作包和独立分支
     L->>B: 分配工作包和独立分支
-    A->>G: 提交 agent/A/work-a
-    B->>G: 提交 agent/B/work-b
+    A->>G: 提交本地 agent/A/work-a
+    B->>G: 提交本地 agent/B/work-b
     A->>L: 报告提交 测试 风险和合并请求
     B->>L: 报告提交 测试 风险和合并请求
-    L->>G: 按依赖顺序审查 测试和合并
+    L->>G: 按依赖顺序审查 测试并合入本地 main
     alt 冲突或测试失败
         L-->>A: 退回修改并说明原因
         L-->>B: 必要时重新同步接口
     else 集成通过
+        L->>R: 只推送合并后的 main
         L->>M: 报告主分支提交和项目验收结果
         M->>U: 提交结果 风险和待确认事项
     end
 ```
 
-MR 服务必须执行本地分支检查、干净工作区检查、`--no-ff` 合并、冲突后 abort、阻塞 Issue 检查和事件记录。单 Agent 项目由该 Agent 以项目负责人身份审核和合并；多 Agent 项目由登记的项目负责人审核并按依赖顺序合并。每次合入项目 `main` 后，服务必须向总管写入结构化通知。总管可以根据项目负责人失联、租约撤销或用户授权执行接管，但接管原因必须写入事件和审计日志。
+MR 服务必须执行本地分支检查、干净工作区检查、`--no-ff` 合并、冲突后 abort、阻塞 Issue 检查和事件记录。单 Agent 项目由该 Agent 以项目负责人身份审核和合并；多 Agent 项目由登记的项目负责人审核并按依赖顺序合并。MR 服务不得推送开发分支；项目负责人在本地 `main` 合并和验收通过后，才能把 `main` 推送到远端。每次合入项目 `main` 后，服务必须向总管写入结构化通知。总管可以根据项目负责人失联、租约撤销或用户授权执行接管，但接管原因必须写入事件和审计日志。
 
 ## 10. 系统组件关系
 

@@ -6,7 +6,7 @@
 
 ```yaml
 requirement_id: R005
-status: 正在开发
+status: 验收通过
 branch: feature/r005-agent-canvas
 remote_branch_allowed: false
 source_scope:
@@ -42,3 +42,23 @@ runtime_before_change:
 4. 用户可以拖动 Agent，位置使用带版本号的本地存储保存，刷新和状态更新后不重置。
 5. 保留新建任务、持久任务入口与 SSE 状态，不丢失现有调度能力。
 6. 临时测试通过后删除，随后重新执行现有测试和生产构建。
+
+### 验收结果
+
+1. Dashboard 可用区域已改为 Vue Flow 全画布，桌面、移动端及有无 Tab
+   场景均按剩余视口高度自适应。
+2. 现有 Agent 使用本地 `agent-avatar.svg` 图片节点展示，名称位于节点顶部；
+   `online`、`busy` 为绿点，其余状态为红点，并保留可读状态文字。
+3. 节点支持人工拖动，位置保存到带版本号的
+   `wanxiang_agent_canvas_v1`；浏览器实测拖动、刷新恢复和重置布局均通过。
+4. 新建任务、持久任务列表、手动刷新及 SSE 状态已迁移为画布浮层入口。
+5. 临时测试位于 `web/test/`，共 2 个文件、3 个用例，执行通过后已删除。
+6. 删除临时测试后执行 `npm test -- --run`：10 个文件、32 个用例全部通过。
+7. 最终执行 `npm run build` 通过，产物为
+   `index-Nu3tHQOJ.css`、`index-Dem5Oeio.js`；仅保留既有大分包提示。
+8. 浏览器验收：
+   - 1440×900 下画布为 1220×900，3 个 Agent 图片、名称和红绿状态均正确。
+   - 390×844 下页面无横向或纵向文档溢出，画布占满移动工具栏以下区域。
+   - manager 实际拖动 135×78 像素后写入坐标，刷新后恢复同一世界坐标。
+9. 最终运行状态：`wanxiang-agent` 与 `wanxiang-web-dev` 均为 `online`，
+   `/api/health` 返回 `{"ok":true}`；本任务未修改或重启后端。

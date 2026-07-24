@@ -15,12 +15,12 @@
           class="sidebar-toggle"
           data-testid="sidebar-toggle"
           :aria-expanded="!tabs.sidebarCollapsed"
-          :aria-label="tabs.sidebarCollapsed ? '展开导航' : '折叠导航'"
+          :aria-label="tabs.sidebarCollapsed ? '万象工作台' : '万象工作台'"
           @click="tabs.setSidebarCollapsed(!tabs.sidebarCollapsed)"
         >
           <el-icon><Menu /></el-icon>
           <span v-if="!tabs.sidebarCollapsed || mobileNavOpen">
-            {{ tabs.sidebarCollapsed ? '展开导航' : '折叠导航' }}
+            {{ tabs.sidebarCollapsed ? '万象工作台' : '万象工作台' }}
           </span>
         </button>
       </div>
@@ -38,10 +38,11 @@
           v-for="item in navigation"
           :key="item.path"
           :index="item.path"
+          :class="{ 'collapsed-menu-item': tabs.sidebarCollapsed && !mobileNavOpen }"
           :data-nav="item.path"
           @click="openNavigation(item)"
         >
-          <el-icon><component :is="item.icon" /></el-icon>
+          <el-icon class="navigation-icon"><component :is="item.icon" /></el-icon>
           <template #title>
             <span :data-testid="`nav-label-${item.name}`">{{ item.title }}</span>
           </template>
@@ -270,13 +271,15 @@ watch(() => route.fullPath, syncRouteToTabs)
   width: 72px;
 }
 
-.admin-sidebar.is-collapsed .sidebar-menu :deep(.el-menu-item) {
-  justify-content: center;
-  padding-inline: 0 !important;
+.sidebar-menu :deep(.el-menu-item.collapsed-menu-item) {
+  display: grid;
+  width: 52px;
+  padding: 0 !important;
+  place-items: center;
 }
 
-.admin-sidebar.is-collapsed .sidebar-menu :deep(.el-menu-item .el-icon) {
-  margin: 0;
+.sidebar-menu :deep(.el-menu-item.collapsed-menu-item .navigation-icon) {
+  margin: 0 !important;
 }
 
 .sidebar-menu :deep(.el-menu-item) {

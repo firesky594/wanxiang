@@ -34,6 +34,8 @@ backend_healthcheck_result: passed
    `GET http://t.agents.com/api/admin/tasks?limit=100&offset=0`
    返回 `401 Unauthorized`。
 5. 自适应导航部署后，折叠状态下的菜单图标没有在侧栏中水平居中。
+6. 第一次居中修复只让用户改名为“万象工作台”的顶部折叠按钮正确居中，下面的
+   Element Plus 菜单图标仍未统一居中。
 
 ### 当前证据
 
@@ -72,6 +74,9 @@ backend_healthcheck_result: passed
 - SSE 继续使用同源 EventSource 和登录 Cookie，不在 URL 中暴露 Token。
 - 折叠侧栏增加专用 `is-collapsed` 状态，统一 Element Plus 折叠菜单与侧栏宽度为
   `72px`，并清除折叠菜单项的横向 padding 和图标 margin，使折叠按钮与菜单图标居中。
+- 针对第一次修复未稳定命中插件内部节点的问题，折叠时为每个 `el-menu-item` 直接绑定
+  `collapsed-menu-item`，固定菜单项可用宽度为 `52px` 并使用 CSS Grid 居中；每个图标
+  统一绑定 `navigation-icon` 并强制清除 margin。保留用户设置的“万象工作台”名称。
 
 部署验证：
 
@@ -79,8 +84,8 @@ backend_healthcheck_result: passed
 frontend_tests: 32 passed
 frontend_build: passed
 frontend_assets:
-  js: /assets/index-GcVUFoIH.js
-  css: /assets/index-iCoTjAIE.css
+  js: /assets/index-Brt8TS_6.js
+  css: /assets/index-BgWDc-H4.css
 backend_tests: go test ./... passed
 backend_build: passed
 backend_pm2_status: online

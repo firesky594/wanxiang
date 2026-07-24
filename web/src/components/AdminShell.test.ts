@@ -104,4 +104,16 @@ describe('admin shell', () => {
     expect(wrapper.find('[data-testid="workspace-tabs"]').exists()).toBe(false)
     expect(wrapper.get('[data-page="dashboard"]').exists()).toBe(true)
   })
+
+  it('opens and closes the navigation drawer on narrow screens', async () => {
+    const { wrapper } = await mountShell()
+
+    expect(wrapper.classes()).not.toContain('mobile-nav-is-open')
+    await wrapper.get('[data-testid="mobile-nav-toggle"]').trigger('click')
+    expect(wrapper.classes()).toContain('mobile-nav-is-open')
+    expect(wrapper.get('[data-testid="mobile-nav-toggle"]').attributes('aria-expanded')).toBe('true')
+
+    await wrapper.get('[data-testid="mobile-nav-backdrop"]').trigger('click')
+    expect(wrapper.classes()).not.toContain('mobile-nav-is-open')
+  })
 })

@@ -1,9 +1,15 @@
 <template>
-  <section class="admin-shell" :class="{ 'sidebar-is-collapsed': tabs.sidebarCollapsed }">
+  <section
+    class="admin-shell"
+    :class="{
+      'sidebar-is-collapsed': tabs.sidebarCollapsed,
+      'mobile-nav-is-open': mobileNavOpen
+    }"
+  >
     <aside class="admin-sidebar" aria-label="后台导航">
       <div class="sidebar-brand">
         <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <strong v-if="!tabs.sidebarCollapsed">Wanxiang Agent</strong>
+        <strong v-if="!tabs.sidebarCollapsed || mobileNavOpen">Wanxiang Agent</strong>
       </div>
 
       <nav class="sidebar-nav">
@@ -17,7 +23,7 @@
           @click="openNavigation(item)"
         >
           <el-icon><component :is="item.icon" /></el-icon>
-          <span v-if="!tabs.sidebarCollapsed" :data-testid="`nav-label-${item.name}`">
+          <span v-if="!tabs.sidebarCollapsed || mobileNavOpen" :data-testid="`nav-label-${item.name}`">
             {{ item.title }}
           </span>
         </button>
@@ -32,11 +38,32 @@
         @click="tabs.setSidebarCollapsed(!tabs.sidebarCollapsed)"
       >
         <el-icon><Expand v-if="tabs.sidebarCollapsed" /><Fold v-else /></el-icon>
-        <span v-if="!tabs.sidebarCollapsed">折叠导航</span>
+        <span v-if="!tabs.sidebarCollapsed || mobileNavOpen">折叠导航</span>
       </button>
     </aside>
 
+    <button
+      v-if="mobileNavOpen"
+      type="button"
+      class="mobile-nav-backdrop"
+      data-testid="mobile-nav-backdrop"
+      aria-label="关闭导航"
+      @click="mobileNavOpen = false"
+    ></button>
+
     <section class="workspace">
+      <div class="mobile-toolbar">
+        <button
+          type="button"
+          data-testid="mobile-nav-toggle"
+          :aria-expanded="String(mobileNavOpen)"
+          aria-label="打开导航"
+          @click="mobileNavOpen = !mobileNavOpen"
+        >
+          <el-icon><Menu /></el-icon>
+        </button>
+        <strong>Wanxiang Agent</strong>
+      </div>
       <header v-if="tabs.tabs.length" class="workspace-tabs" data-testid="workspace-tabs">
         <button
           v-for="tab in tabs.tabs"
@@ -83,11 +110,12 @@ import {
   Expand,
   Fold,
   Grid,
+  Menu,
   Share,
   VideoPlay,
   Warning
 } from '@element-plus/icons-vue'
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter, type RouteRecordNormalized } from 'vue-router'
 import { useWorkspaceTabsStore } from '../stores/workspaceTabs'
 
@@ -110,6 +138,7 @@ const iconMap: Record<string, typeof Grid> = {
 const router = useRouter()
 const route = useRoute()
 const tabs = useWorkspaceTabsStore()
+const mobileNavOpen = ref(false)
 
 const navigation = computed<NavigationItem[]>(() => router.getRoutes()
   .filter((item) => typeof item.meta.navOrder === 'number' && item.meta.navTitle)
@@ -140,6 +169,7 @@ function isWorkspacePath(path: string) {
 
 async function openNavigation(item: NavigationItem) {
   tabs.openTab({ path: item.path, title: item.title })
+  mobileNavOpen.value = false
   await router.push(item.path)
 }
 
@@ -236,6 +266,11 @@ watch(() => route.fullPath, syncRouteToTabs)
   min-width: 0;
 }
 
+.mobile-toolbar,
+.mobile-nav-backdrop {
+  display: none;
+}
+
 .workspace-tabs {
   display: flex;
   gap: 6px;
@@ -267,5 +302,55 @@ watch(() => route.fullPath, syncRouteToTabs)
 .tab-close {
   display: inline-grid;
   place-items: center;
+}
+
+@media (max-width: 767px) {
+  .admin-shell,
+  .admin-shell.sidebar-is-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: 220px;
+    transform: translateX(-100%);
+    transition: transform 180ms ease;
+  }
+
+  .mobile-nav-is-open .admin-sidebar {
+    transform: translateX(0);
+  }
+
+  .mobile-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: block;
+    border: 0;
+    background: rgba(18, 30, 26, 0.48);
+  }
+
+  .mobile-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--wx-line);
+    background: #fff;
+  }
+
+  .mobile-toolbar button {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--wx-line);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+  }
 }
 </style>

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title description">
+  <title id="title">Wanxiang Agent 机器人头像</title>
+  <desc id="description">带发光核心和机械外壳的智能体机器人形象</desc>
+  <defs>
+    <radialGradient id="halo" cx="50%" cy="44%" r="56%">
+      <stop offset="0" stop-color="#bfffe8" stop-opacity=".78"/>
+      <stop offset=".48" stop-color="#4bd3b1" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#0a1714" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shell" x1="48" y1="45" x2="270" y2="282" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#effff9"/>
+      <stop offset=".46" stop-color="#91d5c0"/>
+      <stop offset="1" stop-color="#286f60"/>
+    </linearGradient>
+    <linearGradient id="face" x1="94" y1="91" x2="231" y2="213" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173630"/>
+      <stop offset="1" stop-color="#081411"/>
+    </linearGradient>
+    <linearGradient id="chest" x1="96" y1="215" x2="219" y2="297" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#386f64"/>
+      <stop offset="1" stop-color="#112c26"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <circle cx="160" cy="154" r="142" fill="url(#halo)"/>
+  <g opacity=".42" fill="none" stroke="#8bf2d4" stroke-width="2">
+    <path d="M35 156a125 125 0 0 1 250 0"/>
+    <path d="M53 211a125 125 0 0 0 214 0"/>
+    <path d="M160 15v28M160 278v27M17 160h28M275 160h28"/>
+  </g>
+  <g>
+    <path d="M139 56h42l7 27h-56z" fill="url(#shell)"/>
+    <circle cx="160" cy="50" r="12" fill="#73f2d0" filter="url(#glow)"/>
+    <path d="M87 110 110 81h100l23 29 11 91-32 33H108l-32-33z" fill="url(#shell)"/>
+    <path d="m103 118 18-20h78l18 20 6 71-25 27h-76l-25-27z" fill="url(#face)"/>
+    <path d="M126 146h26v19h-26zM168 146h26v19h-26z" rx="8" fill="#9dffe3" filter="url(#glow)"/>
+    <circle cx="139" cy="155" r="5" fill="#fff"/>
+    <circle cx="181" cy="155" r="5" fill="#fff"/>
+    <path d="M130 191h60" fill="none" stroke="#5cb9a2" stroke-linecap="round" stroke-width="7"/>
+    <path d="M79 129H61l-14 23v48l18 16h21M241 129h18l14 23v48l-18 16h-21" fill="none" stroke="#5cae98" stroke-linejoin="round" stroke-width="12"/>
+    <path d="m108 229-31 20-13 55h192l-13-55-31-20z" fill="url(#chest)"/>
+    <path d="m123 236 37 23 37-23-10 55h-54z" fill="#0b1c18"/>
+    <circle cx="160" cy="270" r="17" fill="#72f0cf" opacity=".3" filter="url(#glow)"/>
+    <circle cx="160" cy="270" r="8" fill="#d8fff3"/>
+    <path d="M91 266h31M198 266h31M87 283h38M195 283h38" stroke="#68bba5" stroke-linecap="round" stroke-width="5"/>
+  </g>
+</svg>

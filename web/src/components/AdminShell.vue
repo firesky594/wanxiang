@@ -318,8 +318,13 @@ watch(() => route.fullPath, syncRouteToTabs)
 }
 
 .workspace-content {
+  --workspace-chrome-height: 0px;
   min-width: 0;
   padding: 0;
+}
+
+.workspace-tabs + .workspace-content {
+  --workspace-chrome-height: 52px;
 }
 
 .mobile-toolbar,
@@ -360,6 +365,14 @@ watch(() => route.fullPath, syncRouteToTabs)
 }
 
 @media (max-width: 767px) {
+  .workspace-content {
+    --workspace-chrome-height: 52px;
+  }
+
+  .workspace-tabs + .workspace-content {
+    --workspace-chrome-height: 104px;
+  }
+
   .admin-sidebar {
     position: fixed;
     inset: 0 auto 0 0;

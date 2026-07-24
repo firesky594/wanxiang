@@ -92,3 +92,16 @@ Vue Flow、浏览器 API 及框架生命周期回调不在此列。
 87. `web/src/views/TaskDetail.vue` `freezeRecovery`：确认并冻结工作包及写权限。
 88. `web/src/views/TaskDetail.vue` `unfreezeRecovery`：确认解冻工作包并换发租约。
 89. `web/src/views/TaskDetail.vue` `reassignRecovery`：校验风险并创建步骤接力工作区。
+90. `web/src/components/AgentCanvas.vue` `isConnectedStatus`：判断 Agent 状态是否表示当前可连接。
+91. `web/src/components/AgentCanvas.vue` `formatAgentStatus`：将 Agent 原始状态转换为画布文字。
+92. `web/src/components/AgentCanvas.vue` `agentTone`：按 Agent 名称稳定选择节点强调色。
+93. `web/src/components/AgentCanvas.vue` `readLayout`：读取并校验已保存的 Agent 画布位置。
+94. `web/src/components/AgentCanvas.vue` `defaultPosition`：为 Agent 生成不重叠的默认坐标。
+95. `web/src/components/AgentCanvas.vue` `syncAgentNodes`：按最新 Agent 数据同步节点及位置。
+96. `web/src/components/AgentCanvas.vue` `persistNodePosition`：保存拖动结束后的 Agent 节点坐标。
+97. `web/src/components/AgentCanvas.vue` `resetLayout`：清除自定义坐标并恢复默认布局。
+98. `web/src/views/Dashboard.vue` `refreshAgents`：刷新 Agent 列表、连接状态及错误信息。
+99. `web/src/views/Dashboard.vue` `loadDashboardData`：初始化任务、项目、Agent 与实时事件。
+100. `web/src/views/Dashboard.vue` `openTaskComposer`：打开新建任务抽屉并清除上次结果。
+101. `web/src/views/Dashboard.vue` `openTaskList`：打开持久任务列表抽屉。
+102. `web/src/views/Dashboard.vue` `resetAgentLayout`：重置 Agent 画布布局并提示结果。

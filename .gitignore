@@ -10,3 +10,15 @@ server/wanxiang
 *.log
 .DS_Store
 .worktrees/
+.codex/
+.vscode/
+.worktrees
+.codex
+.superpowers
+.superpowers/
+docs/
+docs
+docker/
+.docker
+.opencode
+opencode

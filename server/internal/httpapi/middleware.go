@@ -29,13 +29,14 @@ func RequireAdmin(db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := bearerToken(r)
-			if token == "" {
-				if cookie, err := r.Cookie(adminSessionCookie); err == nil {
-					token = cookie.Value
-				}
-			}
 			username, ok := validAdminSession(r.Context(), db, token)
 			if !ok {
+				if cookie, err := r.Cookie(adminSessionCookie); err == nil && cookie.Value != token {
+					username, ok = validAdminSession(r.Context(), db, cookie.Value)
+				}
+			}
+			if !ok {
+				clearAdminSessionCookie(w)
 				writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid or expired admin session"})
 				return
 			}
@@ -43,6 +44,18 @@ func RequireAdmin(db *sql.DB) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func clearAdminSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     adminSessionCookie,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0).UTC(),
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 }
 
 func RequireAgent(db *sql.DB) func(http.Handler) http.Handler {

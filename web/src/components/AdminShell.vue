@@ -42,7 +42,7 @@
           :data-nav="item.path"
           @click="openNavigation(item)"
         >
-          <el-icon class="navigation-icon"><component :is="item.icon" /></el-icon>
+          <el-icon class="navigation-icon" ><component :is="item.icon"  /></el-icon>
           <template #title>
             <span :data-testid="`nav-label-${item.name}`">{{ item.title }}</span>
           </template>
@@ -288,6 +288,11 @@ watch(() => route.fullPath, syncRouteToTabs)
 
 .sidebar-menu :deep(.el-menu-item.collapsed-menu-item .navigation-icon) {
   margin: 0 !important;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sidebar-menu :deep(.el-menu-item) {

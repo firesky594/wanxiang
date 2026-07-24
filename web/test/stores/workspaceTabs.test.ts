@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useWorkspaceTabsStore } from './workspaceTabs'
+import { useWorkspaceTabsStore } from '../../src/stores/workspaceTabs'
 
 function createStorage(): Storage {
   const values = new Map<string, string>()

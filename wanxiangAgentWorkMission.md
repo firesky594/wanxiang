@@ -111,3 +111,32 @@ frontend_backup: /tmp/wanxiang-web-dist-before-r001-rework-20260724T1024.tar.gz
 2. 登录后确认任务列表不再返回 401，Dashboard 显示 `SSE 在线`。
 3. 确认左侧默认显示图标和文字，菜单按钮可以折叠并重新展开。
 4. 以上真实登录验收通过后，才能将 R001 再次归档为“已完成”。
+
+## 前端行为与测试目录规范化
+
+2026-07-24 完成以下规范化工作：
+
+1. 新增 `web/rules.md`，统一组件、导航、Tab、本地状态、API、鉴权、SSE、
+   响应式样式、测试与部署行为。
+2. 将前端现有 10 个测试文件从 `web/src/` 迁移至 `web/test/`，并按
+   `api/`、`components/`、`stores/`、`views/` 镜像源码职责。
+3. 调整测试导入路径及 Vite glob 路径，`web/src/` 已不存在
+   `*.test.*` 或 `*.spec.*`。
+4. `npm test` 固定只运行 `web/test/`。
+5. 新任务为验证而新增的测试默认是临时文件：完成测试与生产构建、记录验证结果后必须删除；
+   只有用户明确要求长期保留或迁移现有基线测试时才允许保留。
+
+验证结果：
+
+```yaml
+frontend_test_directory: web/test
+source_test_files: 0
+baseline_test_files: 10
+frontend_tests: 32 passed
+frontend_build: passed
+frontend_assets:
+  js: /assets/index-Brt8TS_6.js
+  css: /assets/index-BgWDc-H4.css
+temporary_tests_added: 0
+temporary_tests_remaining: 0
+```

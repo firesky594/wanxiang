@@ -5,8 +5,8 @@ import { defineComponent } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it } from 'vitest'
 import ElementPlus from 'element-plus'
-import AdminShell from './AdminShell.vue'
-import { useWorkspaceTabsStore } from '../stores/workspaceTabs'
+import AdminShell from '../../src/components/AdminShell.vue'
+import { useWorkspaceTabsStore } from '../../src/stores/workspaceTabs'
 
 function createStorage(): Storage {
   const values = new Map<string, string>()

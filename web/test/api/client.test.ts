@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { api, cleanupTaskWorkspace, createAdminTask, extendLeaseDeadline, freezeLease, overrideTaskMatch, reassignLease, repairTaskWorkspace, saveAgentConfig, unfreezeLease } from './client'
-import { useAuthStore } from '../stores/auth'
+import { api, cleanupTaskWorkspace, createAdminTask, extendLeaseDeadline, freezeLease, overrideTaskMatch, reassignLease, repairTaskWorkspace, saveAgentConfig, unfreezeLease } from '../../src/api/client'
+import { useAuthStore } from '../../src/stores/auth'
 
 describe('authenticated API client', () => {
   const setItem = vi.fn()

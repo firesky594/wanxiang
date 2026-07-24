@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useEventsStore } from './events'
+import { useEventsStore } from '../../src/stores/events'
 
 describe('runtime event store', () => {
   beforeEach(() => {

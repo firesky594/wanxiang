@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useTasksStore } from './tasks'
+import { useTasksStore } from '../../src/stores/tasks'
 
 describe('persisted task store', () => {
   beforeEach(() => {

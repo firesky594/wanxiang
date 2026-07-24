@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import Agents from './Agents.vue'
+import Agents from '../../src/views/Agents.vue'
 
-vi.mock('../api/client', () => ({
+vi.mock('../../src/api/client', () => ({
   listAgentConfigs: vi.fn().mockResolvedValue([]),
   probeAgent: vi.fn(),
   saveAgentConfig: vi.fn()

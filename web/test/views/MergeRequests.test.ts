@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-const files = import.meta.glob(['./MergeRequests.vue', '../api/client.ts'], {
+const files = import.meta.glob(['/src/views/MergeRequests.vue', '/src/api/client.ts'], {
   eager: true,
   import: 'default',
   query: '?raw'
@@ -8,8 +8,8 @@ const files = import.meta.glob(['./MergeRequests.vue', '../api/client.ts'], {
 
 describe('merge request read-only console', () => {
   it('uses administrator read APIs and exposes no code lifecycle writes', () => {
-    const view = files['./MergeRequests.vue']
-    const client = files['../api/client.ts']
+    const view = files['/src/views/MergeRequests.vue']
+    const client = files['/src/api/client.ts']
 
     expect(view).toContain('listMergeRequests')
     expect(view).toContain('getMergeRequest')
@@ -21,7 +21,7 @@ describe('merge request read-only console', () => {
   })
 
   it('shows report evidence, review history, loading and empty states', () => {
-    const view = files['./MergeRequests.vue']
+    const view = files['/src/views/MergeRequests.vue']
 
     for (const label of ['报告版本', '测试证据', '风险', '审核记录', '暂无合并请求', '加载失败']) {
       expect(view).toContain(label)

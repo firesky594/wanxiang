@@ -97,8 +97,10 @@ const projects = ref<Project[]>([])
 const projectMode = ref<'new'|'existing'>('new')
 const selectedProjectID = ref<number>()
 
+/** 获取最新一条运行事件供 Dashboard 展示。 */
 const lastEvent = computed(() => events.events.at(-1))
 
+/** 初始化任务、项目和实时事件数据。 */
 onMounted(async () => {
   await tasks.loadList()
   const projectResponse = await api<{ok:boolean;projects:Project[]}>('/api/admin/projects?limit=100&offset=0')
@@ -106,6 +108,7 @@ onMounted(async () => {
   events.connect()
 })
 
+/** 校验任务信息并按项目模式创建后台任务。 */
 async function createTask() {
   if (!taskTitle.value.trim()) {
     ElMessage.warning('请输入任务标题')

@@ -157,6 +157,7 @@ const route = useRoute()
 const tabs = useWorkspaceTabsStore()
 const mobileNavOpen = ref(false)
 
+/** 从路由元数据生成按顺序排列的后台导航项。 */
 const navigation = computed<NavigationItem[]>(() => router.getRoutes()
   .filter((item) => typeof item.meta.navOrder === 'number' && item.meta.navTitle)
   .sort((left, right) => Number(left.meta.navOrder) - Number(right.meta.navOrder))
@@ -167,34 +168,40 @@ const navigation = computed<NavigationItem[]>(() => router.getRoutes()
     icon: iconMap[String(item.meta.navIcon)] || Grid
   })))
 
+/** 根据路由元数据或任务编号生成标签页标题。 */
 function routeTitle(record: RouteRecordNormalized) {
   if (record.meta.navTitle) return String(record.meta.navTitle)
   if (record.name === 'task-detail') return `任务 #${String(route.params.id)}`
   return String(record.name || route.path)
 }
 
+/** 将当前工作区路由同步为已打开标签页。 */
 function syncRouteToTabs() {
   const record = route.matched.at(-1)
   if (!record?.meta.workspace || route.path === '/dashboard' && tabs.tabs.length === 0) return
   tabs.openTab({ path: route.fullPath, title: routeTitle(record) })
 }
 
+/** 判断指定路径是否属于可打开的工作区页面。 */
 function isWorkspacePath(path: string) {
   const resolved = router.resolve(path)
   return resolved.matched.some((record) => record.meta.workspace)
 }
 
+/** 打开导航对应标签，并切换路由与关闭移动端菜单。 */
 async function openNavigation(item: NavigationItem) {
   tabs.openTab({ path: item.path, title: item.title })
   mobileNavOpen.value = false
   await router.push(item.path)
 }
 
+/** 激活指定标签并跳转到对应路由。 */
 async function activateTab(path: string) {
   tabs.activateTab(path)
   await router.push(path)
 }
 
+/** 关闭标签，并在必要时跳转相邻页面或 Dashboard。 */
 async function closeTab(path: string) {
   const nextPath = tabs.closeTab(path)
   if (route.fullPath === path) {
@@ -202,6 +209,7 @@ async function closeTab(path: string) {
   }
 }
 
+/** 恢复持久化工作区，并将路由校正到当前激活标签。 */
 onMounted(async () => {
   tabs.restore(isWorkspacePath)
   if (tabs.activePath && tabs.activePath !== route.fullPath) {

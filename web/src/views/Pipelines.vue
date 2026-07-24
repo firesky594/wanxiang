@@ -3,11 +3,43 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { confirmPipeline, confirmPipelineRollback, listPipelines, type PipelineRun } from '../api/client'
+
 const runs = ref<PipelineRun[]>([])
 const loading = ref(false)
-async function load() { loading.value = true; try { runs.value = await listPipelines() } finally { loading.value = false } }
-async function confirm(run: number, step: string) { await ElMessageBox.confirm('该操作可能修改本机生产状态，确认继续？', '高风险确认', { type: 'warning', confirmButtonText: '确认执行' }); await confirmPipeline(run, step); ElMessage.success('已记录单独确认'); await load() }
-async function rollback(run:number){await ElMessageBox.confirm('将干净 main 恢复到已验证安全提交并重启已登记 PM2 应用，确认继续？','回滚确认',{type:'error'});await confirmPipelineRollback(run);ElMessage.success('已提交回滚确认');await load()}
+
+/** 加载流水线运行记录并维护加载状态。 */
+async function load() {
+  loading.value = true
+  try {
+    runs.value = await listPipelines()
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 二次确认并授权执行指定流水线步骤。 */
+async function confirm(run: number, step: string) {
+  await ElMessageBox.confirm('该操作可能修改本机生产状态，确认继续？', '高风险确认', {
+    type: 'warning',
+    confirmButtonText: '确认执行'
+  })
+  await confirmPipeline(run, step)
+  ElMessage.success('已记录单独确认')
+  await load()
+}
+
+/** 二次确认并提交流水线生产回滚授权。 */
+async function rollback(run: number) {
+  await ElMessageBox.confirm(
+    '将干净 main 恢复到已验证安全提交并重启已登记 PM2 应用，确认继续？',
+    '回滚确认',
+    { type: 'error' }
+  )
+  await confirmPipelineRollback(run)
+  ElMessage.success('已提交回滚确认')
+  await load()
+}
+
 onMounted(load)
 </script>
 <style scoped>.eyebrow{color:#9a5d13;font:700 11px Consolas;letter-spacing:.16em}.runs{display:grid;gap:14px;margin-top:16px}.panel header{display:flex;justify-content:space-between}.step{display:grid;grid-template-columns:1fr auto;gap:8px;padding:14px 0;border-top:1px solid var(--wx-line)}.step small,.step code{grid-column:1/-1}.empty{text-align:center;color:var(--wx-muted)}@media(max-width:700px){.step{grid-template-columns:1fr}}</style>

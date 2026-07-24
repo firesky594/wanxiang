@@ -35,6 +35,7 @@ export const router = createRouter({
   ]
 })
 
+/** 根据本地登录令牌控制公开页与后台页的访问跳转。 */
 router.beforeEach((to) => {
   const token = localStorage.getItem('wanxiang_admin_token')
   if (!to.meta.public && !token) {
@@ -45,6 +46,7 @@ router.beforeEach((to) => {
   }
 })
 
+/** 收到管理员未授权事件后跳转登录页并保留原地址。 */
 window.addEventListener('wanxiang:admin-unauthorized', () => {
   const current = router.currentRoute.value
   if (current.path === '/login') return

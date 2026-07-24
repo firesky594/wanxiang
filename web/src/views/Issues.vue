@@ -48,6 +48,7 @@ const form = reactive({
 const created = ref<Issue | null>(null)
 const creating = ref(false)
 
+/** 整理表单参数并创建一条人工问题记录。 */
 async function createIssue() {
   creating.value = true
   try {

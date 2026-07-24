@@ -69,11 +69,14 @@ const loading = ref(false)
 const saving = ref(false)
 const probing = ref(false)
 const form = reactive({ name: '', provider_type: 'openai' as ProviderType, model: modelDefaults.openai, base_url: defaults.openai, api_key: '' })
+/** 判断当前表单是否正在编辑已有 Agent。 */
 const editingExisting = computed(() => agents.value.some((agent) => agent.name === form.name))
+/** 根据密钥配置状态生成密钥输入提示。 */
 const apiKeyPlaceholder = computed(() => selected.value?.secret_configured ? '留空以保留当前密钥' : 'API Key')
 
 onMounted(load)
 
+/** 加载 Agent 配置列表并维护加载状态。 */
 async function load() {
   loading.value = true
   try {
@@ -83,6 +86,7 @@ async function load() {
   }
 }
 
+/** 将选中 Agent 配置回填到编辑表单。 */
 function edit(agent: AgentConfig) {
   selected.value = agent
   form.name = agent.name
@@ -92,11 +96,13 @@ function edit(agent: AgentConfig) {
   form.api_key = ''
 }
 
+/** 按服务商类型应用默认接口地址与模型。 */
 function applyProviderDefault() {
   form.base_url = defaults[form.provider_type]
   form.model = modelDefaults[form.provider_type]
 }
 
+/** 清除选择并恢复 Agent 表单默认值。 */
 function resetForm() {
   selected.value = null
   Object.assign(form, { name: '', provider_type: 'openai', model: modelDefaults.openai, base_url: defaults.openai, api_key: '' })
@@ -104,6 +110,7 @@ function resetForm() {
 
 defineExpose({ form, edit, applyProviderDefault, resetForm })
 
+/** 校验并保存 Agent 配置，然后刷新列表。 */
 async function save() {
   if (!form.name.trim() || !form.model.trim() || (!form.api_key.trim() && !selected.value?.secret_configured)) {
     ElMessage.warning('请填写 Agent 名称、模型和 API Key')
@@ -125,6 +132,7 @@ async function save() {
   }
 }
 
+/** 探测当前 Agent 接口并刷新配置状态。 */
 async function probe() {
   probing.value = true
   try {

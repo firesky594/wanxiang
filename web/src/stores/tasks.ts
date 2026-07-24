@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { api, type Task, type TaskDetail } from '../api/client'
 
 export const useTasksStore = defineStore('tasks', {
+  /** 初始化任务列表、详情和请求状态。 */
   state: () => ({
     tasks: [] as Task[],
     detail: null as TaskDetail | null,
@@ -9,6 +10,7 @@ export const useTasksStore = defineStore('tasks', {
     error: ''
   }),
   actions: {
+    /** 加载后台任务列表并维护加载与错误状态。 */
     async loadList() {
       this.loading = true
       this.error = ''
@@ -22,6 +24,7 @@ export const useTasksStore = defineStore('tasks', {
         this.loading = false
       }
     },
+    /** 加载指定任务详情并维护加载与错误状态。 */
     async loadDetail(id: number) {
       this.loading = true
       this.error = ''

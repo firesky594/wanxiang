@@ -30,8 +30,10 @@ import type { RuntimeEvent } from '../stores/events'
 
 const props = defineProps<{ events: RuntimeEvent[] }>()
 
+/** 取最近八条事件并按最新优先排列。 */
 const recent = computed(() => props.events.slice(-8).reverse())
 
+/** 将事件载荷格式化为便于阅读的 JSON 文本。 */
 function formatPayload(payload: unknown) {
   return JSON.stringify(payload ?? {}, null, 2)
 }

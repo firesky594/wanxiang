@@ -140,3 +140,44 @@ frontend_assets:
 temporary_tests_added: 0
 temporary_tests_remaining: 0
 ```
+
+## 前端自定义函数中文注释与索引
+
+### 执行范围
+
+1. 仅处理 `web/src/` 内由项目自行定义的 TypeScript/Vue 函数。
+2. 为自定义 API 方法、Store Action、组件方法和页面业务方法补充中文注释。
+3. Vue、Pinia、Vue Router、Element Plus、Vue Flow、浏览器 API 等框架或插件自带方法不纳入。
+4. `computed`、`onMounted`、`watch`、路由守卫等框架回调不作为独立自定义函数登记。
+5. 在 `web/web_func_doc.md` 中按“序号. 路径 方法 50字内介绍”连续排序。
+
+### 验证要求
+
+```yaml
+source_scope: web/src
+comment_language: 中文
+function_document: web/web_func_doc.md
+frontend_tests_required: true
+frontend_build_required: true
+temporary_tests_allowed: false
+runtime_must_remain_online: true
+status: 已完成
+```
+
+### 执行结果
+
+```yaml
+documented_custom_functions: 89
+source_chinese_function_comments: 112
+framework_and_plugin_methods_documented: 0
+function_document_numbering: continuous
+descriptions_over_50_characters: 0
+temporary_tests_added: 0
+frontend_tests: 32 passed
+frontend_build: passed
+frontend_assets:
+  js: /assets/index-mCUdmzLg.js
+  css: /assets/index-B8k3V72h.css
+backend_pm2_status: online
+backend_healthcheck: '{"ok":true}'
+```

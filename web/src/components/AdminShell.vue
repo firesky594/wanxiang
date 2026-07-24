@@ -1,46 +1,57 @@
 <template>
-  <section
+  <el-container
     class="admin-shell"
-    :class="{
-      'sidebar-is-collapsed': tabs.sidebarCollapsed,
-      'mobile-nav-is-open': mobileNavOpen
-    }"
+    :class="{ 'mobile-nav-is-open': mobileNavOpen }"
   >
-    <aside class="admin-sidebar" aria-label="后台导航">
-      <div class="sidebar-brand">
-        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
-        <strong v-if="!tabs.sidebarCollapsed || mobileNavOpen">Wanxiang Agent</strong>
+    <el-aside
+      class="admin-sidebar"
+      :width="tabs.sidebarCollapsed ? '72px' : '220px'"
+      aria-label="后台导航"
+    >
+      <div class="sidebar-head">
+        <button
+          type="button"
+          class="sidebar-toggle"
+          data-testid="sidebar-toggle"
+          :aria-expanded="!tabs.sidebarCollapsed"
+          :aria-label="tabs.sidebarCollapsed ? '展开导航' : '折叠导航'"
+          @click="tabs.setSidebarCollapsed(!tabs.sidebarCollapsed)"
+        >
+          <el-icon><Menu /></el-icon>
+          <span v-if="!tabs.sidebarCollapsed || mobileNavOpen">
+            {{ tabs.sidebarCollapsed ? '展开导航' : '折叠导航' }}
+          </span>
+        </button>
       </div>
 
-      <nav class="sidebar-nav">
-        <button
+      <el-menu
+        class="sidebar-menu"
+        :default-active="route.path"
+        :collapse="tabs.sidebarCollapsed && !mobileNavOpen"
+        :collapse-transition="true"
+        background-color="#1d2d29"
+        text-color="#dce9e4"
+        active-text-color="#ffffff"
+      >
+        <el-menu-item
           v-for="item in navigation"
           :key="item.path"
-          type="button"
-          :class="{ active: route.path === item.path }"
+          :index="item.path"
           :data-nav="item.path"
-          :aria-label="item.title"
           @click="openNavigation(item)"
         >
           <el-icon><component :is="item.icon" /></el-icon>
-          <span v-if="!tabs.sidebarCollapsed || mobileNavOpen" :data-testid="`nav-label-${item.name}`">
-            {{ item.title }}
-          </span>
-        </button>
-      </nav>
+          <template #title>
+            <span :data-testid="`nav-label-${item.name}`">{{ item.title }}</span>
+          </template>
+        </el-menu-item>
+      </el-menu>
 
-      <button
-        type="button"
-        class="sidebar-toggle"
-        data-testid="sidebar-toggle"
-        :aria-expanded="!tabs.sidebarCollapsed"
-        :aria-label="tabs.sidebarCollapsed ? '展开导航' : '折叠导航'"
-        @click="tabs.setSidebarCollapsed(!tabs.sidebarCollapsed)"
-      >
-        <el-icon><Expand v-if="tabs.sidebarCollapsed" /><Fold v-else /></el-icon>
-        <span v-if="!tabs.sidebarCollapsed || mobileNavOpen">折叠导航</span>
-      </button>
-    </aside>
+      <div v-if="!tabs.sidebarCollapsed || mobileNavOpen" class="sidebar-brand">
+        <span class="brand-mark"><el-icon><Cpu /></el-icon></span>
+        <strong>Wanxiang Agent</strong>
+      </div>
+    </el-aside>
 
     <button
       v-if="mobileNavOpen"
@@ -51,8 +62,8 @@
       @click="mobileNavOpen = false"
     ></button>
 
-    <section class="workspace">
-      <div class="mobile-toolbar">
+    <el-container class="workspace" direction="vertical">
+      <el-header class="mobile-toolbar" height="52px">
         <button
           type="button"
           data-testid="mobile-nav-toggle"
@@ -63,8 +74,14 @@
           <el-icon><Menu /></el-icon>
         </button>
         <strong>Wanxiang Agent</strong>
-      </div>
-      <header v-if="tabs.tabs.length" class="workspace-tabs" data-testid="workspace-tabs">
+      </el-header>
+
+      <el-header
+        v-if="tabs.tabs.length"
+        class="workspace-tabs"
+        height="52px"
+        data-testid="workspace-tabs"
+      >
         <button
           v-for="tab in tabs.tabs"
           :key="tab.path"
@@ -88,17 +105,17 @@
             <el-icon><Close /></el-icon>
           </span>
         </button>
-      </header>
+      </el-header>
 
-      <main class="workspace-content">
+      <el-main class="workspace-content">
         <RouterView v-slot="{ Component, route: viewRoute }">
           <KeepAlive>
             <component :is="Component" :key="viewRoute.fullPath" />
           </KeepAlive>
         </RouterView>
-      </main>
-    </section>
-  </section>
+      </el-main>
+    </el-container>
+  </el-container>
 </template>
 
 <script setup lang="ts">
@@ -107,8 +124,6 @@ import {
   Connection,
   Cpu,
   DocumentChecked,
-  Expand,
-  Fold,
   Grid,
   Menu,
   Share,
@@ -199,71 +214,73 @@ watch(() => route.fullPath, syncRouteToTabs)
 
 <style scoped>
 .admin-shell {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
 }
 
-.admin-shell.sidebar-is-collapsed {
-  grid-template-columns: 72px minmax(0, 1fr);
-}
-
 .admin-sidebar {
+  position: relative;
+  z-index: 30;
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  padding: 16px 10px;
+  overflow: hidden;
   color: #eaf5f0;
   background: #1d2d29;
+  transition: width 180ms ease;
 }
 
-.sidebar-brand,
-.sidebar-nav button,
+.sidebar-head {
+  padding: 12px 10px 8px;
+}
+
 .sidebar-toggle {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.sidebar-brand {
+  width: 100%;
   min-height: 42px;
-  margin-bottom: 22px;
-  padding: 0 6px;
-}
-
-.sidebar-brand strong {
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: #2f7d68;
+  cursor: pointer;
   white-space: nowrap;
 }
 
-.sidebar-nav {
-  display: grid;
-  gap: 7px;
+.sidebar-menu {
+  flex: 1;
+  border-right: 0;
 }
 
-.sidebar-nav button,
-.sidebar-toggle {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  border: 0;
+.sidebar-menu:not(.el-menu--collapse) {
+  width: 220px;
+}
+
+.sidebar-menu :deep(.el-menu-item) {
+  margin: 4px 10px;
   border-radius: 7px;
-  color: inherit;
-  background: transparent;
-  cursor: pointer;
 }
 
-.sidebar-nav button:hover,
-.sidebar-nav button.active,
-.sidebar-toggle:hover {
+.sidebar-menu :deep(.el-menu-item.is-active) {
   background: #2f7d68;
 }
 
-.sidebar-toggle {
-  margin-top: auto;
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 16px;
+  white-space: nowrap;
 }
 
 .workspace {
   min-width: 0;
+}
+
+.workspace-content {
+  min-width: 0;
+  padding: 0;
 }
 
 .mobile-toolbar,
@@ -274,7 +291,6 @@ watch(() => route.fullPath, syncRouteToTabs)
 .workspace-tabs {
   display: flex;
   gap: 6px;
-  min-height: 52px;
   padding: 9px 14px;
   overflow-x: auto;
   border-bottom: 1px solid var(--wx-line);
@@ -305,16 +321,10 @@ watch(() => route.fullPath, syncRouteToTabs)
 }
 
 @media (max-width: 767px) {
-  .admin-shell,
-  .admin-shell.sidebar-is-collapsed {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .admin-sidebar {
     position: fixed;
     inset: 0 auto 0 0;
-    z-index: 30;
-    width: 220px;
+    width: 220px !important;
     transform: translateX(-100%);
     transition: transform 180ms ease;
   }
@@ -336,7 +346,6 @@ watch(() => route.fullPath, syncRouteToTabs)
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: 52px;
     padding: 8px 14px;
     border-bottom: 1px solid var(--wx-line);
     background: #fff;

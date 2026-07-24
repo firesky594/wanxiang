@@ -171,6 +171,52 @@ func TestProtectedAdminRouteRejectsRandomHeaderAndAcceptsPersistedSession(t *tes
 	}
 }
 
+func TestAdminAuthFallsBackToValidCookieWhenBearerIsExpired(t *testing.T) {
+	conn := testutil.OpenDB(t)
+	seedAdmin(t, conn, "admin", "secret123")
+	router := NewRouter(Dependencies{DB: conn})
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/admin/login", bytes.NewBufferString(`{"username":"admin","password":"secret123"}`))
+	loginRec := httptest.NewRecorder()
+	router.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK || len(loginRec.Result().Cookies()) != 1 {
+		t.Fatalf("login status=%d cookies=%v", loginRec.Code, loginRec.Result().Cookies())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events/stream", nil)
+	req.Header.Set("Authorization", "Bearer expired-local-token")
+	req.AddCookie(loginRec.Result().Cookies()[0])
+	handler := RequireAdmin(conn)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminAuthClearsInvalidSessionCookie(t *testing.T) {
+	conn := testutil.OpenDB(t)
+	handler := RequireAdmin(conn)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/tasks", nil)
+	req.AddCookie(&http.Cookie{Name: adminSessionCookie, Value: "expired"})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != adminSessionCookie || cookies[0].MaxAge >= 0 {
+		t.Fatalf("expected cleared admin cookie, got %v", cookies)
+	}
+}
+
 func TestAdminAgentConfigSavesAndNeverReturnsAPIKey(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"OK"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))

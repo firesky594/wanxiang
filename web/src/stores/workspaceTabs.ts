@@ -11,7 +11,7 @@ interface PersistedWorkspace {
   sidebarCollapsed?: unknown
 }
 
-const STORAGE_KEY = 'wanxiang_workspace_v1'
+const STORAGE_KEY = 'wanxiang_workspace_v2'
 
 function isWorkspaceTab(value: unknown): value is WorkspaceTab {
   if (!value || typeof value !== 'object') return false
@@ -23,7 +23,7 @@ export const useWorkspaceTabsStore = defineStore('workspaceTabs', {
   state: () => ({
     tabs: [] as WorkspaceTab[],
     activePath: '',
-    sidebarCollapsed: true
+    sidebarCollapsed: false
   }),
   actions: {
     persist() {
@@ -81,7 +81,7 @@ export const useWorkspaceTabsStore = defineStore('workspaceTabs', {
           : restoredTabs[0]?.path || ''
         this.sidebarCollapsed = typeof saved.sidebarCollapsed === 'boolean'
           ? saved.sidebarCollapsed
-          : true
+          : false
         this.persist()
       } catch {
         window.localStorage.removeItem(STORAGE_KEY)

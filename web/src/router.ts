@@ -44,3 +44,12 @@ router.beforeEach((to) => {
     return '/dashboard'
   }
 })
+
+window.addEventListener('wanxiang:admin-unauthorized', () => {
+  const current = router.currentRoute.value
+  if (current.path === '/login') return
+  void router.replace({
+    path: '/login',
+    query: { redirect: current.fullPath }
+  })
+})

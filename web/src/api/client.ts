@@ -13,7 +13,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers
   })
   if (!res.ok) {
-    throw new Error(await res.text())
+    const message = await res.text()
+    if (res.status === 401 && path !== '/api/admin/login' && path !== '/api/admin/bootstrap') {
+      localStorage.removeItem('wanxiang_admin_token')
+      localStorage.removeItem('wanxiang_workspace_v2')
+      window.dispatchEvent(new CustomEvent('wanxiang:admin-unauthorized'))
+    }
+    throw new Error(message)
   }
   return res.json() as Promise<T>
 }

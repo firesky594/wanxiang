@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it } from 'vitest'
+import ElementPlus from 'element-plus'
 import AdminShell from './AdminShell.vue'
 import { useWorkspaceTabsStore } from '../stores/workspaceTabs'
 
@@ -48,7 +49,7 @@ async function mountShell() {
   await router.isReady()
   const wrapper = mount(AdminShell, {
     global: {
-      plugins: [pinia, router],
+      plugins: [pinia, router, ElementPlus],
       stubs: {
         'el-icon': true
       }
@@ -66,9 +67,14 @@ describe('admin shell', () => {
     })
   })
 
-  it('shows icon-only navigation until the sidebar is expanded', async () => {
+  it('shows navigation text by default and supports collapsing and expanding it', async () => {
     const { wrapper } = await mountShell()
     const toggle = wrapper.get('[data-testid="sidebar-toggle"]')
+
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-testid="nav-label-agents"]').text()).toBe('Agents')
+
+    await toggle.trigger('click')
 
     expect(toggle.attributes('aria-expanded')).toBe('false')
     expect(wrapper.find('[data-testid="nav-label-agents"]').exists()).toBe(false)

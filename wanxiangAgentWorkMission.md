@@ -33,6 +33,7 @@ backend_healthcheck_result: passed
 4. 后台数据无响应，浏览器请求
    `GET http://t.agents.com/api/admin/tasks?limit=100&offset=0`
    返回 `401 Unauthorized`。
+5. 自适应导航部署后，折叠状态下的菜单图标没有在侧栏中水平居中。
 
 ### 当前证据
 
@@ -69,6 +70,8 @@ backend_healthcheck_result: passed
   `/login?redirect=<原页面>`。
 - 后端管理员鉴权在 Bearer 无效时继续校验有效 Cookie；鉴权完全失败时清理 HttpOnly Cookie。
 - SSE 继续使用同源 EventSource 和登录 Cookie，不在 URL 中暴露 Token。
+- 折叠侧栏增加专用 `is-collapsed` 状态，统一 Element Plus 折叠菜单与侧栏宽度为
+  `72px`，并清除折叠菜单项的横向 padding 和图标 margin，使折叠按钮与菜单图标居中。
 
 部署验证：
 
@@ -76,8 +79,8 @@ backend_healthcheck_result: passed
 frontend_tests: 32 passed
 frontend_build: passed
 frontend_assets:
-  js: /assets/index-CRwxBtws.js
-  css: /assets/index-O6Zx9rID.css
+  js: /assets/index-GcVUFoIH.js
+  css: /assets/index-iCoTjAIE.css
 backend_tests: go test ./... passed
 backend_build: passed
 backend_pm2_status: online

@@ -77,6 +77,7 @@ describe('admin shell', () => {
     await toggle.trigger('click')
 
     expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('.admin-sidebar').classes()).toContain('is-collapsed')
     expect(wrapper.find('[data-testid="nav-label-agents"]').exists()).toBe(false)
 
     await toggle.trigger('click')

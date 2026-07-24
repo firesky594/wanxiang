@@ -5,6 +5,7 @@
   >
     <el-aside
       class="admin-sidebar"
+      :class="{ 'is-collapsed': tabs.sidebarCollapsed && !mobileNavOpen }"
       :width="tabs.sidebarCollapsed ? '72px' : '220px'"
       aria-label="后台导航"
     >
@@ -254,6 +255,28 @@ watch(() => route.fullPath, syncRouteToTabs)
 
 .sidebar-menu:not(.el-menu--collapse) {
   width: 220px;
+}
+
+.admin-sidebar.is-collapsed .sidebar-head {
+  padding-inline: 10px;
+}
+
+.admin-sidebar.is-collapsed .sidebar-toggle {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.sidebar-menu.el-menu--collapse {
+  width: 72px;
+}
+
+.admin-sidebar.is-collapsed .sidebar-menu :deep(.el-menu-item) {
+  justify-content: center;
+  padding-inline: 0 !important;
+}
+
+.admin-sidebar.is-collapsed .sidebar-menu :deep(.el-menu-item .el-icon) {
+  margin: 0;
 }
 
 .sidebar-menu :deep(.el-menu-item) {

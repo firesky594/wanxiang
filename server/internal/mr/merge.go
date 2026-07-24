@@ -3,6 +3,7 @@ package mr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -24,6 +25,11 @@ type approvedMerge struct {
 	ProjectDir   string
 }
 
+var (
+	errMergeIdentityMissing   = errors.New("source commit has no exact main merge identity")
+	errMergeIdentityAmbiguous = errors.New("source commit has multiple main merge identities")
+)
+
 // Merge 校验负责人、租约及分支后合并主线。
 func (s *Service) Merge(ctx context.Context, principal Principal, mrID int64, input MergeInput) (MergeResult, error) {
 	if principal.Name != input.AgentName || principal.Role != input.Role {
@@ -40,6 +46,23 @@ func (s *Service) Merge(ctx context.Context, principal Principal, mrID int64, in
 		return MergeResult{}, ErrIdentityMismatch
 	}
 	projectDir, err := files.UnderRoot(s.cfg.ProjectDir, record.ProjectDir)
+	if err != nil {
+		return MergeResult{}, ErrBranchOwnership
+	}
+	lockedProjectID := record.ProjectID
+	releaseProjectLock, err := gitx.AcquireProjectLock(ctx, s.cfg.DataDir, lockedProjectID)
+	if err != nil {
+		return MergeResult{}, fmt.Errorf("acquire project git lock: %w", err)
+	}
+	defer releaseProjectLock()
+	record, err = s.loadApprovedMerge(ctx, mrID)
+	if err != nil || record.ProjectID != lockedProjectID || record.Status != MRApproved {
+		return MergeResult{}, ErrStateConflict
+	}
+	if principal.Name != record.Lead {
+		return MergeResult{}, ErrIdentityMismatch
+	}
+	projectDir, err = files.UnderRoot(s.cfg.ProjectDir, record.ProjectDir)
 	if err != nil {
 		return MergeResult{}, ErrBranchOwnership
 	}
@@ -83,6 +106,11 @@ func (s *Service) Merge(ctx context.Context, principal Principal, mrID int64, in
 	if err != nil || strings.TrimSpace(branchCommit) != record.SourceCommit {
 		return MergeResult{}, ErrCheckpointMismatch
 	}
+	if existingMerge, identityErr := uniqueMainMergeCommit(ctx, projectDir, record.SourceCommit); identityErr == nil {
+		return s.persistMerged(ctx, record, mrID, principal.Name, existingMerge)
+	} else if !errors.Is(identityErr, errMergeIdentityMissing) {
+		return MergeResult{}, identityErr
+	}
 	if out, err := gitx.Run(ctx, projectDir, "status", "--porcelain"); err != nil || strings.TrimSpace(out) != "" {
 		return MergeResult{}, ErrMergeBlocked
 	}
@@ -96,11 +124,10 @@ func (s *Service) Merge(ctx context.Context, principal Principal, mrID int64, in
 		}
 		return MergeResult{}, mergeErr
 	}
-	mergeCommitRaw, err := gitx.Run(ctx, projectDir, "rev-parse", "HEAD")
+	mergeCommit, err := uniqueMainMergeCommit(ctx, projectDir, record.SourceCommit)
 	if err != nil {
 		return MergeResult{}, err
 	}
-	mergeCommit := strings.TrimSpace(mergeCommitRaw)
 	return s.persistMerged(ctx, record, mrID, principal.Name, mergeCommit)
 }
 
@@ -114,18 +141,50 @@ func (s *Service) ReconcileMerge(ctx context.Context, mrID int64) (MergeResult, 
 	if err != nil {
 		return MergeResult{}, ErrBranchOwnership
 	}
-	if out, err := gitx.Run(ctx, projectDir, "merge-base", "--is-ancestor", record.SourceCommit, "main"); err != nil {
-		return MergeResult{}, fmt.Errorf("source commit is not merged: %w: %s", err, strings.TrimSpace(out))
+	lockedProjectID := record.ProjectID
+	releaseProjectLock, err := gitx.AcquireProjectLock(ctx, s.cfg.DataDir, lockedProjectID)
+	if err != nil {
+		return MergeResult{}, fmt.Errorf("acquire project git lock: %w", err)
 	}
-	mainRaw, err := gitx.Run(ctx, projectDir, "rev-parse", "main")
+	defer releaseProjectLock()
+	record, err = s.loadApprovedMerge(ctx, mrID)
+	if err != nil || record.ProjectID != lockedProjectID || record.Status != MRApproved {
+		return MergeResult{}, ErrStateConflict
+	}
+	projectDir, err = files.UnderRoot(s.cfg.ProjectDir, record.ProjectDir)
+	if err != nil {
+		return MergeResult{}, ErrBranchOwnership
+	}
+	mergeCommit, err := uniqueMainMergeCommit(ctx, projectDir, record.SourceCommit)
 	if err != nil {
 		return MergeResult{}, err
 	}
-	mainCommit := strings.TrimSpace(mainRaw)
-	if mainCommit == record.SourceCommit {
-		return MergeResult{}, ErrStateConflict
+	return s.persistMerged(ctx, record, mrID, record.Lead, mergeCommit)
+}
+
+func uniqueMainMergeCommit(ctx context.Context, projectDir, sourceCommit string) (string, error) {
+	history, err := gitx.Run(ctx, projectDir, "rev-list", "--first-parent", "--parents", "main")
+	if err != nil {
+		return "", fmt.Errorf("read main merge history: %w: %s", err, strings.TrimSpace(history))
 	}
-	return s.persistMerged(ctx, record, mrID, record.Lead, mainCommit)
+	match := ""
+	for _, line := range strings.Split(history, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 || fields[2] != sourceCommit {
+			continue
+		}
+		if match != "" {
+			return "", errMergeIdentityAmbiguous
+		}
+		match = fields[0]
+	}
+	if match == "" {
+		return "", errMergeIdentityMissing
+	}
+	if out, err := gitx.Run(ctx, projectDir, "merge-base", "--is-ancestor", match, "main"); err != nil {
+		return "", fmt.Errorf("exact merge commit is not on main: %w: %s", err, strings.TrimSpace(out))
+	}
+	return match, nil
 }
 
 func (s *Service) loadApprovedMerge(ctx context.Context, mrID int64) (approvedMerge, error) {
@@ -138,6 +197,18 @@ func (s *Service) loadApprovedMerge(ctx context.Context, mrID int64) (approvedMe
 }
 
 func (s *Service) persistMerged(ctx context.Context, record approvedMerge, mrID int64, actor, mergeCommit string) (MergeResult, error) {
+	projectDir, err := files.UnderRoot(s.cfg.ProjectDir, record.ProjectDir)
+	if err != nil {
+		return MergeResult{}, ErrBranchOwnership
+	}
+	currentMainCommit, err := gitx.Run(ctx, projectDir, "rev-parse", "main")
+	if err != nil || strings.TrimSpace(currentMainCommit) == "" {
+		return MergeResult{}, fmt.Errorf("read current main commit: %w: %s", err, strings.TrimSpace(currentMainCommit))
+	}
+	currentMainCommit = strings.TrimSpace(currentMainCommit)
+	if out, ancestorErr := gitx.Run(ctx, projectDir, "merge-base", "--is-ancestor", mergeCommit, currentMainCommit); ancestorErr != nil {
+		return MergeResult{}, fmt.Errorf("exact merge commit is not on current main: %w: %s", ancestorErr, strings.TrimSpace(out))
+	}
 	detail, _, err := s.loadDetail(ctx, mrID)
 	if err != nil {
 		return MergeResult{}, err
@@ -169,6 +240,13 @@ func (s *Service) persistMerged(ctx context.Context, record approvedMerge, mrID 
 	}
 	if _, err := tx.ExecContext(ctx, `update task_step_leases set status='completed',updated_at=? where lease_id=?`, now, record.LeaseID); err != nil {
 		return MergeResult{}, err
+	}
+	result, err = tx.ExecContext(ctx, `update projects set main_commit=? where id=?`, currentMainCommit, record.ProjectID)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return MergeResult{}, ErrStateConflict
 	}
 	if _, err := tx.ExecContext(ctx, `insert into manager_notifications(project_id,task_id,mr_id,report_id,project_lead,main_commit,payload_json,status,created_at) values(?,?,?,?,?,?,?,'pending',?)`, record.ProjectID, record.TaskID, mrID, record.ReportID, record.Lead, mergeCommit, payload, now); err != nil {
 		return MergeResult{}, err

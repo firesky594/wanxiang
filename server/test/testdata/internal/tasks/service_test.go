@@ -82,6 +82,74 @@ func TestUpdateTaskStatusEnforcesTransitions(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskStatusRollsBackWhenEventInsertFails(t *testing.T) {
+	cfg, _ := config.Load(t.TempDir())
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn, events.NewBus(conn))
+	taskID := insertTaskFixture(t, conn, "status-event-failure", "2026-07-14T01:00:00Z")
+	if _, err := conn.Exec(`create trigger reject_task_status_event before insert on runtime_events
+		when new.event_type='task.status_changed'
+		begin
+			select raise(abort, 'forced event failure');
+		end`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.UpdateStatus(t.Context(), taskID, "planning", "manager"); err == nil {
+		t.Fatal("expected event insert failure")
+	}
+	var status string
+	if err := conn.QueryRow(`select status from tasks where id=?`, taskID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "created" {
+		t.Fatalf("status changed without its event: %q", status)
+	}
+}
+
+func TestManualPlanningRetryResetsRetryStateAtomically(t *testing.T) {
+	cfg, _ := config.Load(t.TempDir())
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn, events.NewBus(conn))
+	taskID := insertTaskFixture(t, conn, "manual-retry", "2026-07-14T01:00:00Z")
+	if _, err := conn.Exec(`update tasks set
+		status='blocked: planning_error',
+		planning_attempts=4,
+		planning_error_class='configuration',
+		planning_next_retry_at='2026-07-25T00:00:00Z',
+		planning_started_at='2026-07-24T00:00:00Z',
+		planning_condition_hash='old'
+		where id=?`, taskID); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.UpdateStatus(t.Context(), taskID, "created", "admin")
+	if err != nil || got.Status != "created" {
+		t.Fatalf("task=%+v err=%v", got, err)
+	}
+	var status, class, condition string
+	var attempts int
+	var nextRetry, started sql.NullString
+	if err := conn.QueryRow(`select status,planning_attempts,planning_error_class,
+		planning_next_retry_at,planning_started_at,planning_condition_hash
+		from tasks where id=?`, taskID).
+		Scan(&status, &attempts, &class, &nextRetry, &started, &condition); err != nil {
+		t.Fatal(err)
+	}
+	if status != "created" || attempts != 0 || class != "" || nextRetry.Valid || started.Valid || condition != "" {
+		t.Fatalf("status=%q attempts=%d class=%q next=%v started=%v condition=%q",
+			status, attempts, class, nextRetry, started, condition)
+	}
+	var events int
+	if err := conn.QueryRow(`select count(*) from runtime_events
+		where task_id=? and event_type='task.status_changed'`, taskID).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Fatalf("status event count=%d", events)
+	}
+}
+
 func insertTaskFixture(t *testing.T, conn *sql.DB, title, createdAt string) int64 {
 	t.Helper()
 	res, err := conn.Exec(`insert into projects(slug,dir,status,remote_url,created_at) values(?,?,?,?,?)`, "project-"+title, "/tmp/"+title, "created", "", createdAt)
@@ -249,6 +317,43 @@ func TestCreateTaskPublishesPersistedEvent(t *testing.T) {
 	}
 	if strings.Contains(payload, "description-not-for-events") {
 		t.Fatalf("task description leaked into event: %s", payload)
+	}
+}
+
+func TestResolveTaskCommitOutcomeUsesExactInsertedIdentity(t *testing.T) {
+	root := t.TempDir()
+	cfg, _ := config.Load(root)
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn, events.NewBus(conn))
+	taskID := insertTaskFixture(t, conn, "commit-outcome", "2026-07-24T01:00:00Z")
+	input := CreateTaskInput{Title: "commit-outcome", Description: "commit-outcome description", IdempotencyKey: "commit-outcome-key"}
+	if _, err := conn.Exec(`update tasks set request_fingerprint=?,idempotency_key=? where id=?`,
+		createTaskFingerprint(input), input.IdempotencyKey, taskID); err != nil {
+		t.Fatal(err)
+	}
+	var projectID int64
+	var slug string
+	if err := conn.QueryRow(`select p.id,p.slug from projects p join tasks t on t.project_id=p.id where t.id=?`, taskID).
+		Scan(&projectID, &slug); err != nil {
+		t.Fatal(err)
+	}
+
+	original := errors.New("commit returned an error")
+	recovered, committed, err := svc.resolveTaskCommitOutcome(input, taskID, projectID, slug, original)
+	if err != nil || !committed || recovered.ID != taskID {
+		t.Fatalf("committed outcome: task=%+v committed=%v err=%v", recovered, committed, err)
+	}
+
+	recovered, committed, err = svc.resolveTaskCommitOutcome(input, taskID+1, projectID, slug, original)
+	if err != nil || committed || recovered.ID != taskID {
+		t.Fatalf("idempotent concurrent outcome: task=%+v committed=%v err=%v", recovered, committed, err)
+	}
+
+	withoutKey := input
+	withoutKey.IdempotencyKey = ""
+	recovered, committed, err = svc.resolveTaskCommitOutcome(withoutKey, taskID, projectID, slug, original)
+	if recovered.ID != 0 || committed || !errors.Is(err, original) || !errors.Is(err, errTaskCommitOutcomeUncertain) {
+		t.Fatalf("unkeyed outcome: task=%+v committed=%v err=%v", recovered, committed, err)
 	}
 }
 

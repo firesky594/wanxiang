@@ -20,6 +20,7 @@ import (
 const executionClaimTTL = 30 * time.Second
 
 var errExecutionClaimHeld = errors.New("executor claim is held")
+var errExecutionCapacity = errors.New("executor capacity is exhausted")
 
 type executionClaim struct {
 	Token             string
@@ -44,7 +45,7 @@ func newExecutionClaimToken() (string, error) {
 	return "claim_" + hex.EncodeToString(value), nil
 }
 
-func (s *Supervisor) claimExecution(ctx context.Context, lease leases.Lease) (executionClaim, error) {
+func (s *Supervisor) claimExecution(ctx context.Context, lease leases.Lease, agentLimit int) (executionClaim, error) {
 	token, err := newExecutionClaimToken()
 	if err != nil {
 		return executionClaim{}, err
@@ -52,6 +53,20 @@ func (s *Supervisor) claimExecution(ctx context.Context, lease leases.Lease) (ex
 	now := time.Now().UTC()
 	nowText := now.Format(time.RFC3339Nano)
 	expiresText := now.Add(executionClaimTTL).Format(time.RFC3339Nano)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return executionClaim{}, err
+	}
+	defer conn.Close()
+	if err := beginImmediateExecutionClaim(ctx, conn); err != nil {
+		return executionClaim{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "rollback")
+		}
+	}()
 
 	var (
 		existingToken, existingExpiry  string
@@ -60,12 +75,15 @@ func (s *Supervisor) claimExecution(ctx context.Context, lease leases.Lease) (ex
 		pidStart                       int64
 		launchCount, continuationCount int
 	)
-	err = s.db.QueryRowContext(ctx, `select claim_token,coalesce(claim_expires_at,''),status,pid,pid_start_ticks,launch_count,continuation_count
+	err = conn.QueryRowContext(ctx, `select claim_token,coalesce(claim_expires_at,''),status,pid,pid_start_ticks,launch_count,continuation_count
 		from executor_runs where lease_id=?`, lease.LeaseID).
 		Scan(&existingToken, &existingExpiry, &existingStatus, &pid, &pidStart, &launchCount, &continuationCount)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		result, insertErr := s.db.ExecContext(ctx, `insert into executor_runs(
+		if err := executionCapacityAvailable(ctx, conn, lease, s.options.GlobalLimit, agentLimit, now); err != nil {
+			return executionClaim{}, err
+		}
+		result, insertErr := conn.ExecContext(ctx, `insert into executor_runs(
 				task_id,step_id,agent_name,lease_id,lease_version,status,claim_token,claim_owner,claim_expires_at,
 				created_at,updated_at
 			) values(?,?,?,?,?,'starting',?,?,?,?,?)
@@ -92,7 +110,10 @@ func (s *Supervisor) claimExecution(ctx context.Context, lease leases.Lease) (ex
 		if launchCount > 0 && continuationCount >= maxLeaseContinuations {
 			return executionClaim{}, errContinuationBlocked
 		}
-		result, updateErr := s.db.ExecContext(ctx, `update executor_runs
+		if err := executionCapacityAvailable(ctx, conn, lease, s.options.GlobalLimit, agentLimit, now); err != nil {
+			return executionClaim{}, err
+		}
+		result, updateErr := conn.ExecContext(ctx, `update executor_runs
 			set task_id=?,step_id=?,agent_name=?,lease_version=?,status='starting',
 				claim_token=?,claim_owner=?,claim_expires_at=?,pid=null,pid_start_ticks=0,
 				exit_code=null,error_summary='',exited_at=null,updated_at=?
@@ -106,7 +127,83 @@ func (s *Supervisor) claimExecution(ctx context.Context, lease leases.Lease) (ex
 			return executionClaim{}, errExecutionClaimHeld
 		}
 	}
+	if _, err := conn.ExecContext(ctx, "commit"); err != nil {
+		return executionClaim{}, err
+	}
+	committed = true
 	return executionClaim{Token: token, Lease: lease, LaunchCount: launchCount, ContinuationCount: continuationCount}, nil
+}
+
+func beginImmediateExecutionClaim(ctx context.Context, conn *sql.Conn) error {
+	for {
+		if _, err := conn.ExecContext(ctx, "begin immediate"); err == nil {
+			return nil
+		} else if !sqliteBusy(err) {
+			return err
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func sqliteBusy(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") || strings.Contains(message, "database is busy") ||
+		strings.Contains(message, "sqlite_busy")
+}
+
+func executionCapacityAvailable(ctx context.Context, conn *sql.Conn, lease leases.Lease, globalLimit, agentLimit int, now time.Time) error {
+	if globalLimit < 1 {
+		globalLimit = 1
+	}
+	if agentLimit < 1 {
+		agentLimit = 1
+	}
+	rows, err := conn.QueryContext(ctx, `select lease_id,agent_name,claim_token,coalesce(claim_expires_at,''),pid,pid_start_ticks,status
+		from executor_runs where claim_token<>'' or status in ('starting','running')`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	globalActive, agentActive := 0, 0
+	for rows.Next() {
+		var (
+			leaseID, agentName, token, expires, status string
+			pid                                        sql.NullInt64
+			pidStart                                   int64
+		)
+		if err := rows.Scan(&leaseID, &agentName, &token, &expires, &pid, &pidStart, &status); err != nil {
+			return err
+		}
+		if leaseID == lease.LeaseID {
+			continue
+		}
+		active := false
+		if token != "" {
+			active = claimStillOwned(expires, pid, pidStart, now)
+		} else if (status == "starting" || status == "running") && pid.Valid && pid.Int64 > 0 {
+			active = executionProcessAlive(int(pid.Int64), pidStart)
+		}
+		if !active {
+			continue
+		}
+		globalActive++
+		if agentName == lease.AgentName {
+			agentActive++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if globalActive >= globalLimit || agentActive >= agentLimit {
+		return errExecutionCapacity
+	}
+	return nil
 }
 
 func (s *Supervisor) prepareClaimedLease(ctx context.Context, lease leases.Lease) (leases.Lease, error) {
@@ -227,8 +324,8 @@ func (s *Supervisor) loadExecutionLease(ctx context.Context, ref leases.LeaseRef
 }
 
 func claimStillOwned(expires string, pid sql.NullInt64, startTicks int64, now time.Time) bool {
-	if pid.Valid && pid.Int64 > 0 && executionProcessAlive(int(pid.Int64), startTicks) {
-		return true
+	if pid.Valid && pid.Int64 > 0 {
+		return executionProcessAlive(int(pid.Int64), startTicks)
 	}
 	deadline, err := time.Parse(time.RFC3339Nano, expires)
 	return err == nil && now.Before(deadline)

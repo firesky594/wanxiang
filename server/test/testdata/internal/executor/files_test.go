@@ -52,7 +52,12 @@ func TestReadFileWriteFileRejectUnsafePathsAndBadLease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, path := range []string{"/etc/passwd", "../outside", "README.md", "src/link", "src/.env", "src/env", ".git/config", "wanxiangAgent.md", "wanxiangAgentWorkMission.md", "deploy/app.env"} {
+	for _, path := range []string{
+		"/etc/passwd", "../outside", "README.md", "src/link", "src/.env", "src/env",
+		"src/credentials.json", "src/secrets/config.json", "src/client.pem", "src/private.key",
+		"src/certificate.p12", "src/.ssh/id_rsa", "src/.docker/config.json", "src/.git-credentials", "src/:glob-pattern",
+		".git/config", "wanxiangAgent.md", "wanxiangAgentWorkMission.md", "deploy/app.env",
+	} {
 		t.Run(path, func(t *testing.T) {
 			if _, err := tools.ReadFile(t.Context(), ref, path); err == nil {
 				t.Fatal("expected rejection")

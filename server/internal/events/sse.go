@@ -21,7 +21,6 @@ func ServeSSE(bus *Bus) http.HandlerFunc {
 				return
 			case event := <-ch:
 				body, _ := json.Marshal(event)
-				fmt.Fprintf(w, "event: %s\n", event.Type)
 				fmt.Fprintf(w, "data: %s\n\n", body)
 				if flusher != nil {
 					flusher.Flush()

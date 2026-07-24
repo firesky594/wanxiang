@@ -110,11 +110,16 @@ func (s *Service) UpdateStatus(ctx context.Context, id int64, next, actor string
 		return Task{}, ErrInvalidTransition
 	}
 	previous := detail.Task.Status
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, err
+	}
+	defer tx.Rollback()
 	query := `update tasks set status=? where id=? and status=?`
 	if previous == "blocked: planning_error" && next == "created" {
 		query = `update tasks set status=?,planning_attempts=0,planning_error_class='',planning_next_retry_at=null,planning_started_at=null,planning_condition_hash='' where id=? and status=?`
 	}
-	res, err := s.db.ExecContext(ctx, query, next, id, previous)
+	res, err := tx.ExecContext(ctx, query, next, id, previous)
 	if err != nil {
 		return Task{}, err
 	}
@@ -125,10 +130,21 @@ func (s *Service) UpdateStatus(ctx context.Context, id int64, next, actor string
 	if changed != 1 {
 		return Task{}, ErrInvalidTransition
 	}
-	detail.Task.Status = next
-	if err := s.bus.PublishJSON(ctx, &id, "task.status_changed", actor, map[string]any{"task_id": id, "from": previous, "to": next}); err != nil {
+	payload, err := json.Marshal(map[string]any{"task_id": id, "from": previous, "to": next})
+	if err != nil {
 		return Task{}, err
 	}
+	event, err := events.InsertTx(ctx, tx, events.Event{
+		TaskID: &id, Type: "task.status_changed", Actor: actor, Payload: payload,
+	})
+	if err != nil {
+		return Task{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Task{}, err
+	}
+	detail.Task.Status = next
+	s.bus.Notify(event)
 	return detail.Task, nil
 }
 
@@ -318,7 +334,7 @@ func (s *Service) CreateTaskWithInput(ctx context.Context, input CreateTaskInput
 		return Task{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		recovered, committed, recoverErr := s.resolveNewProjectCommit(input, taskID, projectID, slug, err)
+		recovered, committed, recoverErr := s.resolveTaskCommitOutcome(input, taskID, projectID, slug, err)
 		// 仅在已确认提交或数据库状态仍不可判定时保留目录；明确未提交则由 defer 清理。
 		keepProject = committed || errors.Is(recoverErr, errTaskCommitOutcomeUncertain)
 		return recovered, recoverErr
@@ -373,7 +389,8 @@ func (s *Service) createTaskInExistingProject(ctx context.Context, input CreateT
 	}
 	task := Task{ID: taskID, ProjectID: *input.ProjectID, ProjectSlug: slug, Title: input.Title, Description: input.Description, Status: "created"}
 	if err := tx.Commit(); err != nil {
-		return s.resolveIdempotentCommitError(input, err)
+		recovered, _, recoverErr := s.resolveTaskCommitOutcome(input, taskID, *input.ProjectID, slug, err)
+		return recovered, recoverErr
 	}
 	s.bus.Notify(event)
 	return task, nil
@@ -435,13 +452,14 @@ func (s *Service) resolveIdempotentCreateError(ctx context.Context, input Create
 	}
 }
 
-func (s *Service) resolveIdempotentCommitError(input CreateTaskInput, original error) (Task, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	return s.resolveIdempotentCreateError(ctx, input, original)
-}
-
-func (s *Service) resolveNewProjectCommit(input CreateTaskInput, taskID, projectID int64, slug string, original error) (Task, bool, error) {
+func (s *Service) resolveTaskCommitOutcome(input CreateTaskInput, taskID, projectID int64, slug string, original error) (Task, bool, error) {
+	if input.IdempotencyKey == "" {
+		return Task{}, false, errors.Join(
+			original,
+			errTaskCommitOutcomeUncertain,
+			errors.New("cannot safely resolve commit outcome without an idempotency key"),
+		)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -451,14 +469,15 @@ func (s *Service) resolveNewProjectCommit(input CreateTaskInput, taskID, project
 		var fingerprint string
 		err := s.db.QueryRowContext(ctx, `select t.id,t.project_id,p.slug,t.title,t.description,t.status,t.request_fingerprint
 			from tasks t join projects p on p.id=t.project_id
-			where t.id=? and t.project_id=? and p.slug=?`, taskID, projectID, slug).
+			where t.idempotency_key=?`, input.IdempotencyKey).
 			Scan(&task.ID, &task.ProjectID, &task.ProjectSlug, &task.Title, &task.Description, &task.Status, &fingerprint)
 		switch {
 		case err == nil:
 			if fingerprint != createTaskFingerprint(input) {
-				return Task{}, true, ErrIdempotencyConflict
+				return Task{}, false, ErrIdempotencyConflict
 			}
-			return task, true, nil
+			exactInsert := task.ID == taskID && task.ProjectID == projectID && task.ProjectSlug == slug
+			return task, exactInsert, nil
 		case errors.Is(err, sql.ErrNoRows):
 			return Task{}, false, original
 		case !isSQLiteBusy(err):

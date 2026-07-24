@@ -24,7 +24,8 @@ func TestPipelineRejectsInjectionAndRedactsPersistentEvidence(t *testing.T) {
 	svc := pipelines.NewService(db)
 	safe := pipelines.Definition{Steps: []pipelines.StepDefinition{{ID: "test", Kind: "test", Command: "go", Args: []string{"test", "./..."}, TimeoutSeconds: 1, MaxAttempts: 1, Reversible: true}}}
 	run, _ := svc.Start(t.Context(), pipelines.StartInput{ProjectID: 1, Definition: safe, IdempotencyKey: "secret", RequestedBy: "admin"})
-	w := pipelines.NewWorker(db, leakingRunner{}, time.Hour, func(int64) (string, error) { return t.TempDir(), nil })
+	projectDir := t.TempDir()
+	w := pipelines.NewWorker(db, leakingRunner{}, time.Hour, func(int64) (string, error) { return projectDir, nil }, t.TempDir())
 	_ = w.Scan(t.Context())
 	var output string
 	_ = db.QueryRow(`select output_summary from pipeline_steps where run_id=?`, run.ID).Scan(&output)

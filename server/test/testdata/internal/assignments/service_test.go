@@ -3,12 +3,14 @@ package assignments
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"wanxiang-agent/server/internal/config"
+	"wanxiang-agent/server/internal/matching"
 	"wanxiang-agent/server/internal/planning"
 	"wanxiang-agent/server/internal/testutil"
 )
@@ -145,6 +147,150 @@ func TestAdminOverrideWritesDecisionEventAndAudit(t *testing.T) {
 	if err := conn.QueryRow(`select count(*) from runtime_events where event_type='task.assignment.overridden'`).Scan(&events); err != nil || events != 1 {
 		t.Fatalf("events=%d err=%v", events, err)
 	}
+}
+
+func TestProjectAccessGrantRollsBackAfterDefinitePersistenceFailure(t *testing.T) {
+	cfg, conn, taskID := assignmentFixture(t)
+	if _, err := conn.Exec(`delete from task_steps where task_id=? and kind='frontend'`, taskID); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(cfg.AgentDir, "api-agent")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	definition := "role: backend\nmax_concurrency: 1\ncapabilities:\n  - go\nproject_access:\n"
+	path := filepath.Join(dir, "agent.yaml")
+	if err := os.WriteFile(path, []byte(definition), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registerAgent(t, conn, cfg, "api-agent", "backend", "online")
+	if _, err := conn.Exec(`create trigger reject_assignment_event before insert on runtime_events
+		when new.event_type='task.assignment.completed'
+		begin
+			select raise(abort, 'forced assignment event failure');
+		end`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewService(cfg, conn).AssignTask(t.Context(), taskID); err == nil {
+		t.Fatal("expected assignment persistence failure")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != definition {
+		t.Fatalf("project access file was not rolled back:\n%s", content)
+	}
+	assertTableCount(t, conn, "task_assignments", 0)
+}
+
+func TestResolveAssignmentCommitOutcomeDistinguishesConfirmedAndUnknown(t *testing.T) {
+	cfg, conn, taskID := assignmentFixture(t)
+	writeAgent(t, cfg, "api-agent", "backend", []string{"go"}, 1)
+	writeAgent(t, cfg, "web-agent", "frontend", []string{"vue"}, 1)
+	registerAgent(t, conn, cfg, "api-agent", "backend", "online")
+	registerAgent(t, conn, cfg, "web-agent", "frontend", "online")
+	svc := NewService(cfg, conn)
+	result, err := svc.AssignTask(t.Context(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := make([]preparedAssignment, 0, len(result.Assignments))
+	for _, assignment := range result.Assignments {
+		prepared = append(prepared, preparedAssignment{
+			step:     step{id: assignment.StepID},
+			selected: matching.CandidateScore{Name: assignment.AgentName},
+		})
+	}
+	persisted, found, err := svc.resolveAssignmentCommitOutcome(taskID, 1, prepared)
+	if err != nil || !found || !assignmentResultMatchesPrepared(persisted, prepared) {
+		t.Fatalf("persisted=%+v found=%v err=%v", persisted, found, err)
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := svc.resolveAssignmentCommitOutcome(taskID, 1, prepared); found || !errors.Is(err, errAssignmentCommitOutcomeUncertain) {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+}
+
+func TestGeneratedAgentMappingUsesTrueLatestSystemDecision(t *testing.T) {
+	_, conn, taskID := assignmentFixture(t)
+	var stepID int64
+	if err := conn.QueryRow(`select id from task_steps where task_id=? order by id limit 1`, taskID).Scan(&stepID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`insert into agent_match_decisions(
+		task_id,step_id,selected_agent,reasons_json,rejections_json,created_by,status,created_at
+	) values(?,?,?,'[]','[]','system','blocked: missing_config','2026-07-24T01:00:00Z')`,
+		taskID, stepID, "sub-old"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`insert into agent_match_decisions(
+		task_id,step_id,selected_agent,reasons_json,rejections_json,created_by,status,created_at
+	) values(?,?,?,'[]','[]','system','ready: assignment','2026-07-24T02:00:00Z')`,
+		taskID, stepID, "api-agent"); err != nil {
+		t.Fatal(err)
+	}
+
+	if name, found, err := mappedGeneratedAgent(t.Context(), conn, taskID, 1, stepID); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatalf("stale blocked mapping was resurrected: %q", name)
+	}
+}
+
+func TestReviewAssignmentsConsumeAgentConcurrency(t *testing.T) {
+	cfg, conn, taskID := assignmentFixture(t)
+	writeAgent(t, cfg, "api-agent", "backend", []string{"go"}, 1)
+	registerAgent(t, conn, cfg, "api-agent", "backend", "online")
+	projectResult, err := conn.Exec(`insert into projects(slug,dir,status,remote_url,created_at)
+		values('other-project','/tmp/other-project','created','','now')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := projectResult.LastInsertId()
+	taskResult, err := conn.Exec(`insert into tasks(project_id,title,description,status,created_at)
+		values(?,'other','other','review','now')`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTaskID, _ := taskResult.LastInsertId()
+	item, _ := json.Marshal(planning.WorkItem{Key: "review", Kind: "backend"})
+	stepResult, err := conn.Exec(`insert into task_steps(task_id,agent_name,kind,status,input,created_at)
+		values(?,'api-agent','backend','review',?,'now')`, otherTaskID, item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepID, _ := stepResult.LastInsertId()
+	decisionResult, err := conn.Exec(`insert into agent_match_decisions(
+		task_id,step_id,selected_agent,reasons_json,rejections_json,created_by,status,created_at
+	) values(?,?,?,'[]','[]','system','ready: assignment','now')`, otherTaskID, stepID, "api-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisionID, _ := decisionResult.LastInsertId()
+	if _, err := conn.Exec(`insert into task_assignments(
+		task_id,step_id,agent_name,status,decision_id,created_at
+	) values(?,?,?,'review',?,'now')`, otherTaskID, stepID, "api-agent", decisionID); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := NewService(cfg, conn).loadCandidates(t.Context(), taskID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range candidates {
+		if candidate.Definition.Name == "api-agent" {
+			if candidate.ActiveTasks != 1 {
+				t.Fatalf("review assignment active count=%d", candidate.ActiveTasks)
+			}
+			return
+		}
+	}
+	t.Fatal("api-agent candidate missing")
 }
 
 func assignmentFixture(t *testing.T) (config.Config, *sql.DB, int64) {

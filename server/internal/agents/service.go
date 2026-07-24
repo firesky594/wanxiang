@@ -113,8 +113,12 @@ func (s *Service) EnsureManager(ctx context.Context) (ManagerStatus, error) {
 		status = "blocked: missing_secret"
 	} else {
 		status = "configured"
-		if queryErr := s.db.QueryRowContext(ctx, `select status from agent_registry where name='manager'`).Scan(&status); queryErr != nil && !errors.Is(queryErr, sql.ErrNoRows) {
+		var registeredStatus string
+		if queryErr := s.db.QueryRowContext(ctx, `select status from agent_registry where name='manager'`).Scan(&registeredStatus); queryErr != nil && !errors.Is(queryErr, sql.ErrNoRows) {
 			return ManagerStatus{}, queryErr
+		} else if queryErr == nil && registeredStatus != "blocked: missing_secret" {
+			// 配置已补齐时不能保留旧的 missing_secret；其他运行态由后续 Probe 精确刷新。
+			status = registeredStatus
 		}
 	}
 	_, err = s.db.ExecContext(ctx, `insert into agent_registry(name, role, dir, status, last_heartbeat) values('manager','manager',?,?,datetime('now'))

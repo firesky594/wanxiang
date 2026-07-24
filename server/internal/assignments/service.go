@@ -23,6 +23,8 @@ type Service struct {
 	db  *sql.DB
 }
 
+var errAssignmentCommitOutcomeUncertain = errors.New("assignment commit outcome remains uncertain")
+
 type Assignment struct {
 	StepID    int64  `json:"step_id"`
 	AgentName string `json:"agent_name"`
@@ -197,16 +199,55 @@ func (s *Service) AssignTask(ctx context.Context, taskID int64) (Result, error) 
 	if err == nil {
 		return result, nil
 	}
-	resolveCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	persisted, found, resolveErr := s.existing(resolveCtx, taskID, version)
-	cancel()
-	if resolveErr == nil && found && assignmentResultMatchesPrepared(persisted, prepared) {
-		return persisted, nil
+	if errors.Is(err, errAssignmentCommitOutcomeUncertain) {
+		persisted, found, resolveErr := s.resolveAssignmentCommitOutcome(taskID, version, prepared)
+		if resolveErr == nil && found {
+			return persisted, nil
+		}
+		if resolveErr != nil {
+			// 数据库结果仍不确定时保留已授予的 project_access，避免已提交分配失去文件权限。
+			return Result{}, errors.Join(err, resolveErr)
+		}
 	}
 	if rollbackErr := rollbackProjectAccessChanges(changes); rollbackErr != nil {
 		return Result{}, errors.Join(err, fmt.Errorf("rollback project access grants: %w", rollbackErr))
 	}
 	return Result{}, err
+}
+
+func (s *Service) resolveAssignmentCommitOutcome(taskID, version int64, prepared []preparedAssignment) (Result, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		persisted, found, err := s.existing(ctx, taskID, version)
+		switch {
+		case err == nil:
+			if found && assignmentResultMatchesPrepared(persisted, prepared) {
+				return persisted, true, nil
+			}
+			return Result{}, false, nil
+		case !isAssignmentSQLiteBusy(err):
+			return Result{}, false, errors.Join(
+				errAssignmentCommitOutcomeUncertain,
+				fmt.Errorf("resolve assignment commit outcome: %w", err),
+			)
+		}
+		select {
+		case <-ctx.Done():
+			return Result{}, false, errors.Join(errAssignmentCommitOutcomeUncertain, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func isAssignmentSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") || strings.Contains(message, "sqlite_busy")
 }
 
 func assignmentResultMatchesPrepared(result Result, prepared []preparedAssignment) bool {
@@ -631,7 +672,10 @@ func (s *Service) persistAssignments(ctx context.Context, taskID, version int64,
 		return Result{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return Result{}, err
+		return Result{}, errors.Join(
+			errAssignmentCommitOutcomeUncertain,
+			fmt.Errorf("commit task assignments: %w", err),
+		)
 	}
 	result.RequiresLead, result.ProjectLead = requiresLead, lead
 	return result, nil

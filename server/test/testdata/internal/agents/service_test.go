@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -263,5 +264,90 @@ func TestLegacyManagerSecretStillRequiresProviderAndModel(t *testing.T) {
 	}
 	if strings.Join(status.MissingEnv, ",") != "AGENT_PROVIDER_TYPE,AGENT_MODEL" {
 		t.Fatalf("MissingEnv=%v", status.MissingEnv)
+	}
+}
+
+func TestLauncherStartAllDowngradesInvalidManagerConfiguration(t *testing.T) {
+	cfg, _ := config.Load(t.TempDir())
+	conn := testutil.OpenDB(t)
+	svc := NewService(cfg, conn)
+	if _, err := svc.EnsureManager(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	managerEnv := filepath.Join(cfg.AgentDir, "manager", "env")
+	if err := os.WriteFile(managerEnv, []byte(
+		"AGENT_PROVIDER_TYPE=unsupported\n"+
+			"AGENT_API_KEY=manager-key\n"+
+			"AGENT_MODEL=manager-model\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	launcher := NewLauncher(svc, svc.bus)
+	t.Cleanup(launcher.Close)
+	status, err := launcher.StartAll(t.Context())
+	if err != nil {
+		t.Fatalf("invalid manager config must not stop the application: %v", err)
+	}
+	if status.Status != "blocked: missing_config" {
+		t.Fatalf("status=%q", status.Status)
+	}
+	var stored string
+	if err := conn.QueryRow(`select status from agent_registry where name='manager'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != "blocked: missing_config" || launcher.IsAgentActive("manager") {
+		t.Fatalf("stored=%q active=%v", stored, launcher.IsAgentActive("manager"))
+	}
+}
+
+func TestChatAgentInvalidOnlineConfigPreservesErrorAndMarksMissingConfig(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		env    string
+		detail string
+	}{
+		{
+			name: "unsupported provider",
+			env: "AGENT_PROVIDER_TYPE=unsupported\n" +
+				"AGENT_API_KEY=worker-key\n" +
+				"AGENT_MODEL=worker-model\n",
+			detail: "unsupported provider",
+		},
+		{
+			name: "missing model",
+			env: "AGENT_PROVIDER_TYPE=openai\n" +
+				"AGENT_API_KEY=worker-key\n",
+			detail: "model are required",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, _ := config.Load(t.TempDir())
+			conn := testutil.OpenDB(t)
+			svc := NewService(cfg, conn)
+			if _, err := svc.SaveAgentConfig(t.Context(), AgentConfigInput{
+				Name: "worker-1", ProviderType: "openai", Model: "worker-model", APIKey: "worker-key",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.Exec(`update agent_registry set status='online' where name='worker-1'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cfg.AgentDir, "worker-1", "env"), []byte(test.env), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := svc.ChatAgent(t.Context(), "worker-1", []providers.Message{{Role: "user", Content: "test"}}, 8)
+			if !errors.Is(err, ErrAgentConfigInvalid) || !strings.Contains(err.Error(), test.detail) {
+				t.Fatalf("error=%q, want original detail %q", err, test.detail)
+			}
+			var status string
+			if err := conn.QueryRow(`select status from agent_registry where name='worker-1'`).Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			if status != "blocked: missing_config" {
+				t.Fatalf("status=%q", status)
+			}
+		})
 	}
 }

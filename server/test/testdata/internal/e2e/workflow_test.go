@@ -32,7 +32,7 @@ func TestLocalPipelineConfirmationRetryAndRollbackTimeline(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "app.bin"), []byte("old"), 0644)
 	runner := &sequenceRunner{results: []pipelines.Result{{FailureClass: "environment_failure", Err: errors.New("temporary")}, {}, {}}}
-	worker := pipelines.NewWorker(db, runner, time.Hour, func(int64) (string, error) { return dir, nil })
+	worker := pipelines.NewWorker(db, runner, time.Hour, func(int64) (string, error) { return dir, nil }, t.TempDir())
 	_ = worker.Scan(t.Context())
 	_, _ = db.Exec(`update pipeline_steps set next_retry_at='2000-01-01' where run_id=?`, run.ID)
 	_ = worker.Scan(t.Context())

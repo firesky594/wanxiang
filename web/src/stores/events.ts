@@ -9,14 +9,6 @@ export interface RuntimeEvent {
   created_at: string
 }
 
-const namedEvents = [
-  'task.created',
-  'mr.created',
-  'mr.merged',
-  'issue.created',
-  'token.usage'
-]
-
 export const useEventsStore = defineStore('events', {
   /** 初始化事件列表、连接状态和 SSE 事件源。 */
   state: () => ({
@@ -33,7 +25,7 @@ export const useEventsStore = defineStore('events', {
       })
       this.events = [...merged.values()].sort((a, b) => a.id - b.id)
     },
-    /** 建立 SSE 连接并注册默认与命名事件监听。 */
+    /** 建立 SSE 连接，并通过通用消息通道接收全部运行事件。 */
     connect() {
       if (this.source) {
         return
@@ -49,11 +41,6 @@ export const useEventsStore = defineStore('events', {
       source.onmessage = (msg) => {
         this.pushEvent(msg)
       }
-      namedEvents.forEach((name) => {
-        source.addEventListener(name, (msg) => {
-          this.pushEvent(msg as MessageEvent)
-        })
-      })
     },
     /** 解析、过滤、去重并追加一条实时事件。 */
     pushEvent(msg: MessageEvent) {

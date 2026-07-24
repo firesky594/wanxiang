@@ -27,10 +27,10 @@ func RunWorkerProcess(ctx context.Context, cfg config.Config, input io.Reader, o
 		return err
 	}
 	workspaceService := workspaces.NewService(cfg, conn, nil)
-	leaseService := leases.NewService(conn, leases.SystemClock{}, workspaceService)
+	leaseService := leases.NewService(conn, leases.SystemClock{}, workspaceService, cfg.DataDir)
 	files := NewFileTools(conn, leaseService)
 	checks := NewCheckRunner(conn, leaseService)
-	checkpoints := NewCheckpointRunner(conn, leaseService, leaseService)
+	checkpoints := NewCheckpointRunner(conn, leaseService, leaseService, cfg.DataDir)
 	registry := providers.NewRegistry(&http.Client{Timeout: 20 * time.Second})
 	runner := NewRunner(conn, NewEnvChatter(registry, ProcessAgentEnv()), files, checks, checkpoints, cfg.AgentDir)
 	runner.freezer = leaseService
